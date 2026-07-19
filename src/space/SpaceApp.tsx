@@ -100,6 +100,7 @@ export const SpaceApp = () => {
 
   // NPCコンシェルジュの状態
   const [npcPhase, setNpcPhase] = useState<NpcPhase>("hidden");
+  const [npcStarted, setNpcStarted] = useState(false);
   const [npcConfig, setNpcConfig] = useState<NpcConfig | null>(null);
   const [npcBubble, setNpcBubble] = useState<string | null>(null);
   const [npcThinking, setNpcThinking] = useState(false);
@@ -149,7 +150,9 @@ export const SpaceApp = () => {
     npcAudio.current = null;
     npcHistory.current = [];
     npcConfigRef.current = null;
+    npcStartedRef.current = false;
     setNpcPhase("hidden");
+    setNpcStarted(false);
     setNpcConfig(null);
     setNpcBubble(null);
     setNpcThinking(false);
@@ -170,13 +173,8 @@ export const SpaceApp = () => {
       const delay = (cfg?.spawn?.delaySeconds ?? 1) * 1000;
       await new Promise((resolve) => setTimeout(resolve, delay));
       if (seq !== summonSeq.current) return;
+      // NPCは登場するだけで、挨拶は④(ユーザーがNPCをクリック)まで待つ
       setNpcPhase("active");
-      const staff = cfg?.greeting?.staffName;
-      const greet =
-        (staff ? `こんにちは。${staff}です。` : "こんにちは。") +
-        (cfg?.greeting?.message ?? "");
-      setNpcBubble(greet);
-      void playNpcAudio(greet);
     } catch (err) {
       if (seq !== summonSeq.current) return;
       setNpcPhase("hidden");
@@ -188,8 +186,20 @@ export const SpaceApp = () => {
     }
   };
 
-  /** ③: NPCクリックで会話開始(ポインターロックは解除済みで呼ばれる) */
-  const openChat = () => {
+  /** ③④: NPCクリックで会話開始。初回クリックで挨拶(テキスト+音声)が始まる */
+  const npcStartedRef = useRef(false);
+  const handleNpcActivate = () => {
+    if (!npcStartedRef.current) {
+      npcStartedRef.current = true;
+      setNpcStarted(true);
+      const cfg = npcConfigRef.current;
+      const staff = cfg?.greeting?.staffName;
+      const greet =
+        (staff ? `こんにちは。${staff}です。` : "こんにちは。") +
+        (cfg?.greeting?.message ?? "");
+      setNpcBubble(greet);
+      void playNpcAudio(greet);
+    }
     setTimeout(() => chatInputRef.current?.focus(), 100);
   };
 
@@ -295,7 +305,7 @@ export const SpaceApp = () => {
             speaking={npcSpeaking}
             bubbleText={npcBubble}
             thinking={npcThinking}
-            onActivate={openChat}
+            onActivate={handleNpcActivate}
             onError={(message) => pushToast(`NPC表示エラー: ${message}`)}
           />
         )}
@@ -384,7 +394,7 @@ export const SpaceApp = () => {
             </p>
           )}
           <div className="flex w-full max-w-2xl items-center justify-end gap-2">
-            {npcAvailable && npcPhase === "active" && (
+            {npcAvailable && npcPhase === "active" && npcStarted && (
               <form
                 onSubmit={sendNpcMessage}
                 className="flex min-w-0 flex-1 gap-2"
@@ -419,11 +429,15 @@ export const SpaceApp = () => {
 
       {/* 中央の呼び出しバナー(Arrivalの「タップしてAIコンシェルジュを呼び出す」相当) */}
       {npcAvailable &&
-        npcPhase !== "active" &&
+        (npcPhase !== "active" || !npcStarted) &&
         !loading &&
         (entered || enteredOnce || !requireLock) && (
           <div className="pointer-events-none fixed left-1/2 top-24 z-20 -translate-x-1/2">
-            {npcPhase === "summoning" ? (
+            {npcPhase === "active" ? (
+              <div className="rounded-full border-2 border-cyan-400/80 bg-black/75 px-6 py-3 text-center text-sm text-white shadow-xl">
+                💬 AIコンシェルジュをクリックして会話をはじめてください
+              </div>
+            ) : npcPhase === "summoning" ? (
               <div className="flex items-center gap-3 rounded-full border-2 border-cyan-400/80 bg-black/75 px-6 py-3 text-sm text-white shadow-xl">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-cyan-300" />
                 {npcConfig?.spawn?.loadingMessage ??
@@ -460,7 +474,7 @@ export const SpaceApp = () => {
             {activeSpace ? `${activeSpace.title} ・ ` : ""}WASD: 移動
             {npcPhase === "active"
               ? " ・ NPCに照準を合わせてクリックで会話 ・ Esc: メニュー"
-              : npcAvailable
+              : npcAvailable && npcPhase === "hidden"
                 ? " ・ C: コンシェルジュ呼び出し ・ Esc: メニュー"
                 : " ・ Esc: メニュー"}
           </div>

@@ -54,18 +54,30 @@ const NpcAvatarInner = ({
     };
   }, [animationName, actions]);
 
-  // ポインターロック中: 画面中央の照準がNPCに合った状態でクリック→会話開始
+  // NPCへのクリック判定(自前レイキャスト)。
+  // - ポインターロック中: 画面中央の照準がNPCに合った状態でクリック
+  // - 非ロック時: マウスカーソル位置でクリック(canvas上のみ)
   useEffect(() => {
     if (!onActivate) return;
     const raycaster = new THREE.Raycaster();
-    const center = new THREE.Vector2(0, 0);
-    const onMouseDown = () => {
-      if (!document.pointerLockElement || !group.current) return;
-      raycaster.setFromCamera(center, camera);
+    const pointer = new THREE.Vector2();
+    const onMouseDown = (e: MouseEvent) => {
+      if (!group.current) return;
+      if (document.pointerLockElement) {
+        pointer.set(0, 0);
+      } else {
+        // DOMボタン等へのクリックは無視し、canvas直上のクリックだけを拾う
+        if (!(e.target instanceof HTMLCanvasElement)) return;
+        pointer.set(
+          (e.clientX / window.innerWidth) * 2 - 1,
+          -(e.clientY / window.innerHeight) * 2 + 1
+        );
+      }
+      raycaster.setFromCamera(pointer, camera);
       raycaster.far = ACTIVATE_DISTANCE;
       const hits = raycaster.intersectObject(group.current, true);
       if (hits.length > 0) {
-        document.exitPointerLock();
+        document.exitPointerLock?.();
         onActivate();
       }
     };
@@ -87,15 +99,7 @@ const NpcAvatarInner = ({
   });
 
   return (
-    <group
-      ref={group}
-      position={position}
-      onClick={(e) => {
-        // ポインターロック外(通常マウス)でのクリック
-        e.stopPropagation();
-        onActivate?.();
-      }}
-    >
+    <group ref={group} position={position}>
       <primitive object={avatar} />
       {(headLabel || bubbleText || thinking) && (
         <Html

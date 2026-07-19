@@ -15,6 +15,13 @@ const GROUND_RAY_UP = 0.5;
  * 高さが固定され、上空視点から復帰できなくなる)
  */
 const GROUND_RAY_FAR = 30;
+/**
+ * これより低い接地ヒットは地面とみなさない。屋外スキャンの衝突メッシュは
+ * 濡れた路面の反射により「地下に鏡像の街」を含んでおり、路面メッシュの
+ * 穴を接地レイが素通りすると鏡像を地面と誤認してカメラが地下へ沈む
+ * (行き先クリック後に視点が破綻していた根本原因)
+ */
+const GROUND_MIN_Y = -2;
 /** 追従時にNPCと保つ距離(m) */
 const FOLLOW_DISTANCE = 3;
 /** ドラッグ視点の感度(rad/px) */
@@ -155,11 +162,19 @@ export const Player = ({
       raycaster.current.set(rayOrigin.current, down.current);
       raycaster.current.far = GROUND_RAY_FAR;
       const hits = raycaster.current.intersectObject(collision, true);
-      if (hits.length > 0) {
-        const dy = hits[0].point.y + EYE_HEIGHT - camera.position.y;
+      // 地下の鏡像ノイズ(GROUND_MIN_Y未満)を除いた最も近い面を地面とする
+      const hit = hits.find((h) => h.point.y >= GROUND_MIN_Y);
+      if (hit) {
+        const dy = hit.point.y + EYE_HEIGHT - camera.position.y;
         const step = dy * Math.min(1, delta * 10);
         // 上昇は最大3m/sに制限(階段は登れるが、一瞬で高所に飛ばない)
         camera.position.y += dy > 0 ? Math.min(step, 3 * delta) : step;
+      } else if (camera.position.y < EYE_HEIGHT - 0.5) {
+        // 有効な地面が見つからず地下に沈んでいる場合は路面レベルへ復帰する
+        camera.position.y += Math.min(
+          (EYE_HEIGHT - camera.position.y) * Math.min(1, delta * 10),
+          3 * delta
+        );
       }
     } else {
       camera.position.y = EYE_HEIGHT;

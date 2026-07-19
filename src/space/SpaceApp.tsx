@@ -92,7 +92,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-3";
+const BUILD_TAG = "b0719-4";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -146,6 +146,8 @@ export const SpaceApp = () => {
   const summonSeq = useRef(0);
   const [npcWalk, setNpcWalk] = useState<NpcWalkCommand | null>(null);
   const walkSeq = useRef(0);
+  /** 誘導の世代番号。新しい誘導/リセットで古い「話し終わり待ち」を無効化する */
+  const guideSeq = useRef(0);
   const activeGuide = useRef<GuideTarget | null>(null);
   // 店舗到着後は店主NPCが応対する
   const [activeShop, setActiveShop] = useState<ShopNpc | null>(null);
@@ -178,6 +180,7 @@ export const SpaceApp = () => {
       ? buildShopPersonaConfig(activeShopRef.current, npcConfigRef.current)
       : npcConfigRef.current;
 
+  /** 音声を合成・再生し、話し終わるまで待てるPromiseを返す */
   const playNpcAudio = async (text: string, who: Speaker) => {
     try {
       const audio = await synthesizeVoice(text, currentPersona());
@@ -186,16 +189,24 @@ export const SpaceApp = () => {
       npcAudio.current = audio;
       setSpeaker(who);
       setNpcSpeaking(true);
-      audio.onended = () => setNpcSpeaking(false);
-      audio.onerror = () => setNpcSpeaking(false);
-      await audio.play();
+      await new Promise<void>((resolve) => {
+        audio.onended = () => resolve();
+        audio.onerror = () => resolve();
+        // 別の発話で割り込まれた(pause)場合も待ちを解く
+        audio.onpause = () => resolve();
+        audio.play().catch(() => resolve());
+      });
+      // 別の発話に割り込まれていた場合はその発話側が状態を管理する
+      if (npcAudio.current === audio) setNpcSpeaking(false);
     } catch {
+      // 音声が再生できなくてもテキスト表示だけで続行する
       setNpcSpeaking(false);
     }
   };
 
   const resetNpc = () => {
     summonSeq.current++;
+    guideSeq.current++;
     npcAudio.current?.pause();
     npcAudio.current = null;
     npcHistory.current = [];
@@ -293,15 +304,26 @@ export const SpaceApp = () => {
     setActiveShop(null);
     setShopBubble(null);
     activeGuide.current = gp;
-    if (gp.guideMessage) {
-      setNpcBubble(gp.guideMessage);
-      void playNpcAudio(gp.guideMessage, "concierge");
-    }
+    const seq = ++guideSeq.current;
     const speed = npcConfigRef.current?.walkSpeed ?? 3;
-    npcTrailRef.current.length = 0;
-    setNpcWalk({ id: ++walkSeq.current, path, speed });
-    // ユーザー視点もNPCについて行く(WASDを押すと解除)
-    followRef.current = { active: true, speed };
+    const beginWalk = () => {
+      // 待っている間に別の行き先が選ばれた/リセットされた場合は開始しない
+      if (seq !== guideSeq.current) return;
+      npcTrailRef.current.length = 0;
+      setNpcWalk({ id: ++walkSeq.current, path, speed });
+      // ユーザー視点もNPCについて行く(WASDを押すと解除)
+      followRef.current = { active: true, speed };
+    };
+    if (gp.guideMessage) {
+      // Arrivalと同じく、案内の言葉を話し終えてから歩き出す。
+      // 音声が使えない環境でもテキストを読める程度の間は置く
+      setNpcBubble(gp.guideMessage);
+      const spoken = playNpcAudio(gp.guideMessage, "concierge");
+      const minWait = new Promise((resolve) => setTimeout(resolve, 1500));
+      void Promise.all([spoken, minWait]).then(beginWalk);
+    } else {
+      beginWalk();
+    }
   };
 
   const onNpcWalkDone = () => {

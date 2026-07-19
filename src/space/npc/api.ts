@@ -31,9 +31,45 @@ export type NpcConfig = {
   };
   startMessage?: string;
   guidePoints?: GuidePoint[];
+  /** 店舗NPC(guideEnabledのものは行き先として案内できる) */
+  shopNpcs?: ShopNpc[];
   /** NPCの誘導歩行速度(m/s) */
   walkSpeed?: number;
 };
+
+export type ShopNpc = {
+  name?: string;
+  x?: number;
+  y?: number;
+  z?: number;
+  guideEnabled?: boolean;
+  guideKeywords?: string;
+  greeting?: string;
+  knowledge?: string;
+  avatarUrl?: string;
+};
+
+/**
+ * 行き先リスト = guidePoints + 誘導ONの店舗NPC(Arrivalの行き先パネルと同じ構成)。
+ * 店舗は「店へ歩いて案内 → 到着時に店の挨拶」というGuidePointに変換する。
+ */
+export function buildGuideTargets(config: NpcConfig | null): GuidePoint[] {
+  const shops: GuidePoint[] = (config?.shopNpcs ?? [])
+    .filter((s) => s.guideEnabled && s.name)
+    .map((s) => ({
+      name: s.name,
+      buttonLabel: s.name,
+      type: "walk" as const,
+      x: s.x,
+      y: s.y,
+      z: s.z,
+      keywords: s.guideKeywords,
+      guideMessage: `「${s.name}」にご案内しますね。ついて来てください。`,
+      arrivalMessage: s.greeting || `こちらが「${s.name}」です。`,
+      waypoints: "",
+    }));
+  return [...shops, ...(config?.guidePoints ?? [])];
+}
 
 export type GuidePoint = {
   name?: string;

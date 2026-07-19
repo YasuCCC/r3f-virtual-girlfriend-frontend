@@ -9,6 +9,7 @@ import { Player } from "./components/Player";
 import { SparkRendererMount, SplatLayer } from "./components/SplatLayer";
 import {
   buildGuidePath,
+  buildGuideTargets,
   ChatTurn,
   fetchNpcConfig,
   GuidePoint,
@@ -386,6 +387,7 @@ export const SpaceApp = () => {
   };
 
   const npcAvailable = Boolean(activeSpace?.npc);
+  const guideTargets = useMemo(() => buildGuideTargets(npcConfig), [npcConfig]);
 
   return (
     <div className="h-full w-full">
@@ -614,17 +616,17 @@ export const SpaceApp = () => {
         </>
       )}
 
-      {/* 行き先パネル(guidePoints) */}
+      {/* 行き先パネル(guidePoints + 誘導ONの店舗NPC) */}
       {!entered &&
         npcPhase === "active" &&
         npcStarted &&
-        (npcConfig?.guidePoints?.length ?? 0) > 0 && (
+        guideTargets.length > 0 && (
           <div className="fixed left-4 top-20 z-10 w-56 rounded-2xl bg-black/70 p-3 shadow-xl backdrop-blur">
             <p className="mb-2 px-1 text-xs font-semibold text-gray-300">
               📍 行き先
             </p>
             <div className="flex flex-col gap-1.5">
-              {npcConfig?.guidePoints?.map((gp, i) => (
+              {guideTargets.map((gp, i) => (
                 <button
                   key={i}
                   type="button"

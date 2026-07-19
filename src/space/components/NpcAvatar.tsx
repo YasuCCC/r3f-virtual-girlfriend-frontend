@@ -77,12 +77,16 @@ const NpcAvatarInner = ({
       raycaster.far = ACTIVATE_DISTANCE;
       const hits = raycaster.intersectObject(group.current, true);
       if (hits.length > 0) {
+        // 「canvasクリックで歩行再開」のリスナーに横取りされないよう止める
+        e.stopImmediatePropagation();
         document.exitPointerLock?.();
         onActivate();
       }
     };
-    window.addEventListener("mousedown", onMouseDown);
-    return () => window.removeEventListener("mousedown", onMouseDown);
+    // captureで他のクリックリスナーより先に判定する
+    window.addEventListener("mousedown", onMouseDown, { capture: true });
+    return () =>
+      window.removeEventListener("mousedown", onMouseDown, { capture: true });
   }, [camera, onActivate]);
 
   // プレイヤー(カメラ)の方をゆっくり向く(水平のみ)

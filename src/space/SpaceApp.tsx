@@ -212,12 +212,28 @@ export const SpaceApp = () => {
       const el = document.activeElement;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
         return;
-      document.exitPointerLock?.();
+      // 歩行(ポインターロック)は維持したままNPCを登場させる
       void summonRef.current();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // 空間(canvas)クリックで歩行を再開できるようにする。
+  // NPCへのクリックはNpcAvatar側がcaptureで先に処理して止めるため、ここには来ない。
+  const enteredOnceRef = useRef(false);
+  enteredOnceRef.current = enteredOnce;
+  useEffect(() => {
+    if (!requireLock) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (document.pointerLockElement) return;
+      if (!enteredOnceRef.current) return;
+      if (!(e.target instanceof HTMLCanvasElement)) return;
+      lockRef.current?.();
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    return () => window.removeEventListener("mousedown", onMouseDown);
+  }, [requireLock]);
 
   const loadSpace = (def: SpaceDefinition) => {
     setError(null);
@@ -312,7 +328,11 @@ export const SpaceApp = () => {
         <Player
           onLockChange={(locked) => {
             setEntered(locked);
-            if (locked) setEnteredOnce(true);
+            if (locked) {
+              setEnteredOnce(true);
+              // 歩行再開時にチャット入力へのキー入力が流れないようフォーカスを外す
+              chatInputRef.current?.blur();
+            }
           }}
           collisionRef={collisionRef}
           spawn={activeSpace?.spawn ?? [0, 1.6, 4]}

@@ -14,6 +14,8 @@ export type SpaceDefinition = {
    * 指定レベルのシャード一式を読み込む(0=最精細)
    */
   lod?: { metaUrl: string; level?: number };
+  /** AI-NPCコンシェルジュ(npc-avatar-backendのspaceId設定を使用) */
+  npc?: { position: [number, number, number]; spaceId: string };
   /** 衝突GLBがスプラットと同じ生座標系(Y下向き)で作られている場合true */
   collisionInSplatFrame?: boolean;
   /** スペース内でのスプラット配置(ArrivalのcenterPosition + assetYOffset相当) */
@@ -57,6 +59,7 @@ export const SPACES: SpaceDefinition[] = [
     scale: 4,
     spawn: [0, 1.6, 0],
     light: { type: "directional", rotationDeg: 275, intensity: 1.3 },
+    npc: { position: [0, 0, -3], spaceId: "55732136_9974" },
   },
   {
     // https://live.arrival.space/east_street01 (Yokohama East Avenue01 / 55732136_2242)
@@ -85,5 +88,6 @@ export const SPACES: SpaceDefinition[] = [
     // Arrivalで実測したスポーン位置 (0.08, -0.15, -7.00) + 目線1.6m
     spawn: [0.08, 1.45, -7.0],
     light: { type: "directional", rotationDeg: 275, intensity: 1.3 },
+    npc: { position: [0, 0, -3], spaceId: "55732136_2242" },
   },
 ];

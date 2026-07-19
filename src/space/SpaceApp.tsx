@@ -1,12 +1,19 @@
-import { Stars } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { FormEvent, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { CollisionMesh } from "./components/CollisionMesh";
-import { LodSplatLayer } from "./components/LodSplatLayer";
 import { GalleryRoom } from "./components/GalleryRoom";
+import { LodSplatLayer } from "./components/LodSplatLayer";
+import { NpcAvatar } from "./components/NpcAvatar";
 import { Player } from "./components/Player";
 import { SparkRendererMount, SplatLayer } from "./components/SplatLayer";
+import {
+  ChatTurn,
+  fetchNpcConfig,
+  NpcConfig,
+  sendChat,
+  synthesizeVoice,
+} from "./npc/api";
 import { SpaceDefinition, SPACES } from "./spaces";
 
 const DEG = Math.PI / 180;
@@ -40,7 +47,6 @@ const ArrivalSpace = ({
         position={[lightDir[0], lightDir[1], lightDir[2]]}
         intensity={def.light?.intensity ?? 0.8}
       />
-      <Stars radius={80} depth={40} count={1500} factor={4} fade speed={0.3} />
       <group
         position={def.position ?? [0, 0, 0]}
         rotation={[0, (def.rotationYDeg ?? 0) * DEG, 0]}
@@ -62,7 +68,9 @@ const ArrivalSpace = ({
           />
         )}
         {def.collisionUrl && (
-          <group rotation={def.collisionInSplatFrame ? [Math.PI, 0, 0] : [0, 0, 0]}>
+          <group
+            rotation={def.collisionInSplatFrame ? [Math.PI, 0, 0] : [0, 0, 0]}
+          >
             <CollisionMesh
               url={def.collisionUrl}
               collisionRef={collisionRef}
@@ -77,6 +85,7 @@ const ArrivalSpace = ({
 
 export const SpaceApp = () => {
   const [entered, setEntered] = useState(false);
+  const [enteredOnce, setEnteredOnce] = useState(false);
   const [activeSpace, setActiveSpace] = useState<SpaceDefinition | null>(null);
   const [selectedId, setSelectedId] = useState(SPACES[0].id);
   const [urlInput, setUrlInput] = useState("");
@@ -84,6 +93,16 @@ export const SpaceApp = () => {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const collisionRef = useRef<THREE.Object3D | null>(null);
+  const lockRef = useRef<(() => void) | null>(null);
+
+  // NPCコンシェルジュの状態
+  const [npcConfig, setNpcConfig] = useState<NpcConfig | null>(null);
+  const [npcBubble, setNpcBubble] = useState<string | null>(null);
+  const [npcThinking, setNpcThinking] = useState(false);
+  const [npcSpeaking, setNpcSpeaking] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const npcHistory = useRef<ChatTurn[]>([]);
+  const npcAudio = useRef<HTMLAudioElement | null>(null);
 
   // デバッグ用: ?nolock でポインターロックなしでもWASD移動できる
   const requireLock = useMemo(
@@ -96,17 +115,43 @@ export const SpaceApp = () => {
     return v === null ? undefined : Number(v);
   }, []);
 
-  const loadSelected = () => {
-    const def = SPACES.find((s) => s.id === selectedId);
-    if (!def) return;
-    // 同じスペースを再選択した場合は再読み込みが走らないため何もしない
-    // (loadingだけが立ちっぱなしになるのを防ぐ)
-    if (activeSpace?.id === def.id) return;
+  const resetNpc = (def: SpaceDefinition | null) => {
+    npcAudio.current?.pause();
+    npcAudio.current = null;
+    npcHistory.current = [];
+    setNpcConfig(null);
+    setNpcBubble(null);
+    setNpcThinking(false);
+    setNpcSpeaking(false);
+    if (def?.npc) {
+      fetchNpcConfig(def.npc.spaceId)
+        .then((cfg) => {
+          setNpcConfig(cfg);
+          const staff = cfg?.greeting?.staffName;
+          const greet =
+            (staff ? `こんにちは。${staff}です。` : "こんにちは。") +
+            (cfg?.greeting?.message ?? "");
+          setNpcBubble(greet);
+        })
+        .catch(() => setNpcConfig(null));
+    }
+  };
+
+  const loadSpace = (def: SpaceDefinition) => {
     setError(null);
     setNotice(null);
     setLoading(true);
     collisionRef.current = null;
+    resetNpc(def);
     setActiveSpace(def);
+  };
+
+  const loadSelected = () => {
+    const def = SPACES.find((s) => s.id === selectedId);
+    if (!def) return;
+    // 同じスペースを再選択した場合は再読み込みが走らないため何もしない
+    if (activeSpace?.id === def.id) return;
+    loadSpace(def);
   };
 
   const loadCustomUrl = (e: FormEvent) => {
@@ -114,16 +159,50 @@ export const SpaceApp = () => {
     const url = urlInput.trim();
     if (!url) return;
     if (activeSpace?.id === "custom" && activeSpace.splatUrl === url) return;
-    setError(null);
-    setNotice(null);
-    setLoading(true);
-    collisionRef.current = null;
-    setActiveSpace({
-      id: "custom",
-      title: "カスタムURL",
-      splatUrl: url,
-    });
+    loadSpace({ id: "custom", title: "カスタムURL", splatUrl: url });
   };
+
+  const sendNpcMessage = async (e: FormEvent) => {
+    e.preventDefault();
+    const message = chatInput.trim();
+    if (!message || npcThinking || !activeSpace?.npc) return;
+    setChatInput("");
+    setNpcThinking(true);
+    try {
+      const reply = await sendChat({
+        message,
+        config: npcConfig,
+        history: npcHistory.current,
+      });
+      npcHistory.current = [
+        ...npcHistory.current,
+        { role: "user", content: message },
+        { role: "assistant", content: reply },
+      ];
+      setNpcBubble(reply);
+      setNpcThinking(false);
+      // 音声合成して再生。再生中はTalkingアニメーション
+      const audio = await synthesizeVoice(reply, npcConfig);
+      if (audio) {
+        npcAudio.current?.pause();
+        npcAudio.current = audio;
+        setNpcSpeaking(true);
+        audio.onended = () => setNpcSpeaking(false);
+        audio.onerror = () => setNpcSpeaking(false);
+        await audio.play().catch(() => setNpcSpeaking(false));
+      }
+    } catch (err) {
+      setNpcThinking(false);
+      setNpcBubble(
+        npcConfig?.fallback?.message ??
+          `申し訳ありません、応答できませんでした (${
+            err instanceof Error ? err.message : String(err)
+          })`
+      );
+    }
+  };
+
+  const npcActive = Boolean(activeSpace?.npc);
 
   return (
     <div className="h-full w-full">
@@ -149,16 +228,30 @@ export const SpaceApp = () => {
         ) : (
           <GalleryRoom />
         )}
+        {activeSpace?.npc && (
+          <NpcAvatar
+            position={activeSpace.npc.position}
+            headLabel={npcConfig?.avatar?.headLabel}
+            headLabelColor={npcConfig?.avatar?.headLabelColor}
+            speaking={npcSpeaking}
+            bubbleText={npcBubble}
+            thinking={npcThinking}
+          />
+        )}
         <Player
-          onLockChange={setEntered}
+          onLockChange={(locked) => {
+            setEntered(locked);
+            if (locked) setEnteredOnce(true);
+          }}
           collisionRef={collisionRef}
           spawn={activeSpace?.spawn ?? [0, 1.6, 4]}
           requireLock={requireLock}
+          lockRef={lockRef}
         />
       </Canvas>
 
-      {/* 入場オーバーレイ */}
-      {!entered && (
+      {/* 初回入場前のフルオーバーレイ */}
+      {!entered && !enteredOnce && (
         <div className="pointer-events-none fixed inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-black/60">
           <h1 className="text-3xl font-bold text-white">Space Prototype</h1>
           {activeSpace && (
@@ -220,11 +313,45 @@ export const SpaceApp = () => {
         </div>
       )}
 
-      {/* 読み込みインジケータ */}
-      {loading && (
-        <div className="pointer-events-none fixed left-1/2 top-6 z-20 flex -translate-x-1/2 items-center gap-3 rounded-full bg-black/70 px-5 py-2.5 text-sm text-white shadow-lg">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-white" />
-          スペースを読み込んでいます…(数十MBのデータを取得するため、しばらくお待ちください)
+      {/* 入場後にEscで抜けたとき: シーンを隠さないコンパクトバー(チャット+再開) */}
+      {!entered && enteredOnce && (
+        <div className="fixed inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 p-4">
+          {error && (
+            <p className="rounded bg-black/60 px-3 py-1 text-sm text-red-400">
+              {error}
+            </p>
+          )}
+          <div className="flex w-full max-w-2xl items-center gap-2">
+            {npcActive && (
+              <form onSubmit={sendNpcMessage} className="flex min-w-0 flex-1 gap-2">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder={
+                    npcConfig
+                      ? "コンシェルジュに質問する…"
+                      : "コンシェルジュ設定を読み込み中…"
+                  }
+                  className="min-w-0 flex-1 rounded-full border border-gray-600 bg-gray-900/90 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={npcThinking}
+                  className="whitespace-nowrap rounded-full bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  {npcThinking ? "…" : "送信"}
+                </button>
+              </form>
+            )}
+            <button
+              type="button"
+              onClick={() => lockRef.current?.()}
+              className="whitespace-nowrap rounded-full bg-gray-700/90 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-gray-600"
+            >
+              移動を再開
+            </button>
+          </div>
         </div>
       )}
 
@@ -234,9 +361,17 @@ export const SpaceApp = () => {
           <div className="pointer-events-none fixed left-1/2 top-1/2 z-10 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/80" />
           <div className="pointer-events-none fixed bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/50 px-4 py-1.5 text-xs text-gray-200">
             {activeSpace ? `${activeSpace.title} ・ ` : ""}WASD: 移動 ・ Shift:
-            走る ・ Esc: 退出
+            走る{npcActive ? " ・ Esc: チャット" : " ・ Esc: 退出"}
           </div>
         </>
+      )}
+
+      {/* 読み込みインジケータ */}
+      {loading && (
+        <div className="pointer-events-none fixed left-1/2 top-6 z-20 flex -translate-x-1/2 items-center gap-3 rounded-full bg-black/70 px-5 py-2.5 text-sm text-white shadow-lg">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-white" />
+          スペースを読み込んでいます…(数十MBのデータを取得するため、しばらくお待ちください)
+        </div>
       )}
     </div>
   );

@@ -30,6 +30,12 @@ const arrivalProxy = {
     changeOrigin: true,
     rewrite: (p: string) => p.replace(/^\/arrival-ugc/, ""),
   },
+  // AI-NPCコンシェルジュのバックエンド(BeatBop管理画面と同じAPI)
+  "/npc-api": {
+    target: "https://npc-avatar-backend.vercel.app",
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/npc-api/, ""),
+  },
 };
 
 // https://vitejs.dev/config/

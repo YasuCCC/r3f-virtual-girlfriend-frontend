@@ -22,6 +22,8 @@ type PlayerProps = {
   spawn?: [number, number, number];
   /** デバッグ用: ポインターロックなしでも移動を許可(?nolock) */
   requireLock?: boolean;
+  /** UI側からポインターロックを開始するための関数を受け取るref */
+  lockRef?: MutableRefObject<(() => void) | null>;
 };
 
 export const Player = ({
@@ -30,6 +32,7 @@ export const Player = ({
   collisionRef,
   spawn = [0, EYE_HEIGHT, 4],
   requireLock = true,
+  lockRef,
 }: PlayerProps) => {
   const controls = useRef<ElementRef<typeof PointerLockControls>>(null);
   const keys = useRef<Record<string, boolean>>({});
@@ -45,6 +48,14 @@ export const Player = ({
   useEffect(() => {
     camera.position.set(spawn[0], spawn[1], spawn[2]);
   }, [camera, spawn]);
+
+  useEffect(() => {
+    if (!lockRef) return;
+    lockRef.current = () => controls.current?.lock();
+    return () => {
+      lockRef.current = null;
+    };
+  }, [lockRef]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => (keys.current[e.code] = true);

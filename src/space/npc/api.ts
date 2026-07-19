@@ -23,6 +23,13 @@ export type NpcConfig = {
   avatar?: { headLabel?: string; headLabelColor?: string };
   fallback?: { message?: string };
   readings?: Record<string, string>;
+  spawn?: {
+    loadingMessage?: string;
+    delaySeconds?: number;
+    offsetX?: number;
+    offsetZ?: number;
+  };
+  startMessage?: string;
 };
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };

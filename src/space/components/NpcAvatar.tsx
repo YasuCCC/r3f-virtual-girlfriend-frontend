@@ -1,11 +1,13 @@
 import { Html, useAnimations, useGLTF } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
+import { Component, ReactNode, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 
 const AVATAR_URL = "/models/64f1a714fe61576b46f27ca2.glb";
 const ANIMATIONS_URL = "/models/animations.glb";
+/** ポインターロック中の照準クリックで会話開始できる最大距離(m) */
+const ACTIVATE_DISTANCE = 30;
 
 type NpcAvatarProps = {
   position: [number, number, number];
@@ -16,17 +18,21 @@ type NpcAvatarProps = {
   /** 吹き出しに表示するメッセージ(最新のNPC発言) */
   bubbleText?: string | null;
   thinking?: boolean;
+  /** NPCがクリックされた(=会話を開始したい)ときに呼ばれる */
+  onActivate?: () => void;
 };
 
-export const NpcAvatar = ({
+const NpcAvatarInner = ({
   position,
   headLabel,
   headLabelColor,
   speaking,
   bubbleText,
   thinking,
+  onActivate,
 }: NpcAvatarProps) => {
   const group = useRef<THREE.Group>(null);
+  const camera = useThree((state) => state.camera);
   const { scene } = useGLTF(AVATAR_URL);
   // 既存アバターアプリと同じGLBを使うため、シーンを複製して干渉を避ける
   const avatar = useMemo(() => SkeletonUtils.clone(scene), [scene]);
@@ -48,8 +54,27 @@ export const NpcAvatar = ({
     };
   }, [animationName, actions]);
 
+  // ポインターロック中: 画面中央の照準がNPCに合った状態でクリック→会話開始
+  useEffect(() => {
+    if (!onActivate) return;
+    const raycaster = new THREE.Raycaster();
+    const center = new THREE.Vector2(0, 0);
+    const onMouseDown = () => {
+      if (!document.pointerLockElement || !group.current) return;
+      raycaster.setFromCamera(center, camera);
+      raycaster.far = ACTIVATE_DISTANCE;
+      const hits = raycaster.intersectObject(group.current, true);
+      if (hits.length > 0) {
+        document.exitPointerLock();
+        onActivate();
+      }
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    return () => window.removeEventListener("mousedown", onMouseDown);
+  }, [camera, onActivate]);
+
   // プレイヤー(カメラ)の方をゆっくり向く(水平のみ)
-  useFrame(({ camera }, delta) => {
+  useFrame((_, delta) => {
     if (!group.current) return;
     const dx = camera.position.x - position[0];
     const dz = camera.position.z - position[2];
@@ -62,7 +87,15 @@ export const NpcAvatar = ({
   });
 
   return (
-    <group ref={group} position={position}>
+    <group
+      ref={group}
+      position={position}
+      onClick={(e) => {
+        // ポインターロック外(通常マウス)でのクリック
+        e.stopPropagation();
+        onActivate?.();
+      }}
+    >
       <primitive object={avatar} />
       {(headLabel || bubbleText || thinking) && (
         <Html
@@ -91,6 +124,31 @@ export const NpcAvatar = ({
     </group>
   );
 };
+
+class NpcErrorBoundary extends Component<
+  { children: ReactNode; onError?: (message: string) => void },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: Error) {
+    this.props.onError?.(error.message);
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+/** NPC内部のエラーでシーン全体が止まらないようにバウンダリで包む */
+export const NpcAvatar = (
+  props: NpcAvatarProps & { onError?: (message: string) => void }
+) => (
+  <NpcErrorBoundary onError={props.onError}>
+    <NpcAvatarInner {...props} />
+  </NpcErrorBoundary>
+);
 
 useGLTF.preload(AVATAR_URL);
 useGLTF.preload(ANIMATIONS_URL);

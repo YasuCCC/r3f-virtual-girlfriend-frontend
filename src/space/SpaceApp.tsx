@@ -83,6 +83,8 @@ const ArrivalSpace = ({
   );
 };
 
+type NpcPhase = "hidden" | "summoning" | "active";
+
 export const SpaceApp = () => {
   const [entered, setEntered] = useState(false);
   const [enteredOnce, setEnteredOnce] = useState(false);
@@ -92,10 +94,12 @@ export const SpaceApp = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [toasts, setToasts] = useState<string[]>([]);
   const collisionRef = useRef<THREE.Object3D | null>(null);
   const lockRef = useRef<(() => void) | null>(null);
 
   // NPCコンシェルジュの状態
+  const [npcPhase, setNpcPhase] = useState<NpcPhase>("hidden");
   const [npcConfig, setNpcConfig] = useState<NpcConfig | null>(null);
   const [npcBubble, setNpcBubble] = useState<string | null>(null);
   const [npcThinking, setNpcThinking] = useState(false);
@@ -103,6 +107,8 @@ export const SpaceApp = () => {
   const [chatInput, setChatInput] = useState("");
   const npcHistory = useRef<ChatTurn[]>([]);
   const npcAudio = useRef<HTMLAudioElement | null>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const summonSeq = useRef(0);
 
   // デバッグ用: ?nolock でポインターロックなしでもWASD移動できる
   const requireLock = useMemo(
@@ -115,26 +121,76 @@ export const SpaceApp = () => {
     return v === null ? undefined : Number(v);
   }, []);
 
-  const resetNpc = (def: SpaceDefinition | null) => {
+  const pushToast = (message: string) => {
+    setToasts((prev) => [...prev.slice(-3), message]);
+    setTimeout(() => setToasts((prev) => prev.slice(1)), 8000);
+  };
+
+  const playNpcAudio = async (text: string) => {
+    try {
+      const audio = await synthesizeVoice(text, npcConfigRef.current);
+      if (!audio) return;
+      npcAudio.current?.pause();
+      npcAudio.current = audio;
+      setNpcSpeaking(true);
+      audio.onended = () => setNpcSpeaking(false);
+      audio.onerror = () => setNpcSpeaking(false);
+      await audio.play();
+    } catch {
+      setNpcSpeaking(false);
+    }
+  };
+  // playNpcAudio内で最新configを参照するためのref
+  const npcConfigRef = useRef<NpcConfig | null>(null);
+
+  const resetNpc = () => {
+    summonSeq.current++;
     npcAudio.current?.pause();
     npcAudio.current = null;
     npcHistory.current = [];
+    npcConfigRef.current = null;
+    setNpcPhase("hidden");
     setNpcConfig(null);
     setNpcBubble(null);
     setNpcThinking(false);
     setNpcSpeaking(false);
-    if (def?.npc) {
-      fetchNpcConfig(def.npc.spaceId)
-        .then((cfg) => {
-          setNpcConfig(cfg);
-          const staff = cfg?.greeting?.staffName;
-          const greet =
-            (staff ? `こんにちは。${staff}です。` : "こんにちは。") +
-            (cfg?.greeting?.message ?? "");
-          setNpcBubble(greet);
-        })
-        .catch(() => setNpcConfig(null));
+  };
+
+  /** ②のボタン: AI-NPCコンシェルジュを呼び出す */
+  const summonNpc = async () => {
+    if (!activeSpace?.npc || npcPhase !== "hidden") return;
+    const seq = ++summonSeq.current;
+    setNpcPhase("summoning");
+    try {
+      const cfg = await fetchNpcConfig(activeSpace.npc.spaceId);
+      if (seq !== summonSeq.current) return;
+      setNpcConfig(cfg);
+      npcConfigRef.current = cfg;
+      // Arrivalと同じく少し「呼び出し」の間を置いてから登場させる
+      const delay = (cfg?.spawn?.delaySeconds ?? 1) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (seq !== summonSeq.current) return;
+      setNpcPhase("active");
+      const staff = cfg?.greeting?.staffName;
+      const greet =
+        (staff ? `こんにちは。${staff}です。` : "こんにちは。") +
+        (cfg?.greeting?.message ?? "");
+      setNpcBubble(greet);
+      void playNpcAudio(greet);
+    } catch (err) {
+      if (seq !== summonSeq.current) return;
+      setNpcPhase("hidden");
+      pushToast(
+        `コンシェルジュの呼び出しに失敗しました: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
     }
+  };
+
+  /** ③: NPCクリックで会話開始(ポインターロックは解除済みで呼ばれる) */
+  const openChat = () => {
+    setTimeout(() => chatInputRef.current?.focus(), 100);
   };
 
   const loadSpace = (def: SpaceDefinition) => {
@@ -142,14 +198,13 @@ export const SpaceApp = () => {
     setNotice(null);
     setLoading(true);
     collisionRef.current = null;
-    resetNpc(def);
+    resetNpc();
     setActiveSpace(def);
   };
 
   const loadSelected = () => {
     const def = SPACES.find((s) => s.id === selectedId);
     if (!def) return;
-    // 同じスペースを再選択した場合は再読み込みが走らないため何もしない
     if (activeSpace?.id === def.id) return;
     loadSpace(def);
   };
@@ -165,7 +220,7 @@ export const SpaceApp = () => {
   const sendNpcMessage = async (e: FormEvent) => {
     e.preventDefault();
     const message = chatInput.trim();
-    if (!message || npcThinking || !activeSpace?.npc) return;
+    if (!message || npcThinking || npcPhase !== "active") return;
     setChatInput("");
     setNpcThinking(true);
     try {
@@ -181,28 +236,16 @@ export const SpaceApp = () => {
       ];
       setNpcBubble(reply);
       setNpcThinking(false);
-      // 音声合成して再生。再生中はTalkingアニメーション
-      const audio = await synthesizeVoice(reply, npcConfig);
-      if (audio) {
-        npcAudio.current?.pause();
-        npcAudio.current = audio;
-        setNpcSpeaking(true);
-        audio.onended = () => setNpcSpeaking(false);
-        audio.onerror = () => setNpcSpeaking(false);
-        await audio.play().catch(() => setNpcSpeaking(false));
-      }
+      void playNpcAudio(reply);
     } catch (err) {
       setNpcThinking(false);
-      setNpcBubble(
-        npcConfig?.fallback?.message ??
-          `申し訳ありません、応答できませんでした (${
-            err instanceof Error ? err.message : String(err)
-          })`
-      );
+      const detail = err instanceof Error ? err.message : String(err);
+      setNpcBubble(npcConfig?.fallback?.message ?? "申し訳ありません。");
+      pushToast(`チャットAPIエラー: ${detail}`);
     }
   };
 
-  const npcActive = Boolean(activeSpace?.npc);
+  const npcAvailable = Boolean(activeSpace?.npc);
 
   return (
     <div className="h-full w-full">
@@ -228,7 +271,7 @@ export const SpaceApp = () => {
         ) : (
           <GalleryRoom />
         )}
-        {activeSpace?.npc && (
+        {activeSpace?.npc && npcPhase === "active" && (
           <NpcAvatar
             position={activeSpace.npc.position}
             headLabel={npcConfig?.avatar?.headLabel}
@@ -236,6 +279,8 @@ export const SpaceApp = () => {
             speaking={npcSpeaking}
             bubbleText={npcBubble}
             thinking={npcThinking}
+            onActivate={openChat}
+            onError={(message) => pushToast(`NPC表示エラー: ${message}`)}
           />
         )}
         <Player
@@ -266,7 +311,7 @@ export const SpaceApp = () => {
             クリックして空間に入る
           </button>
           <p className="text-sm text-gray-300">
-            WASD / 矢印キー: 移動 ・ Shift: 走る ・ マウス: 視点 ・ Esc: 退出
+            WASD / 矢印キー: 移動 ・ Shift: 走る ・ マウス: 視点 ・ Esc: メニュー
           </p>
 
           <div className="pointer-events-auto flex w-full max-w-xl items-center gap-2 px-4">
@@ -313,8 +358,9 @@ export const SpaceApp = () => {
         </div>
       )}
 
-      {/* 入場後にEscで抜けたとき: シーンを隠さないコンパクトバー(チャット+再開) */}
-      {!entered && enteredOnce && (
+      {/* 入場後にEscで抜けたとき: シーンを隠さないコンパクトバー
+          (?nolockデバッグ時はスペース読込後に常時表示) */}
+      {!entered && (enteredOnce || (!requireLock && activeSpace)) && (
         <div className="fixed inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 p-4">
           {error && (
             <p className="rounded bg-black/60 px-3 py-1 text-sm text-red-400">
@@ -322,17 +368,33 @@ export const SpaceApp = () => {
             </p>
           )}
           <div className="flex w-full max-w-2xl items-center gap-2">
-            {npcActive && (
-              <form onSubmit={sendNpcMessage} className="flex min-w-0 flex-1 gap-2">
+            {npcAvailable && npcPhase === "hidden" && (
+              <button
+                type="button"
+                onClick={summonNpc}
+                className="flex-1 rounded-full bg-cyan-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-500"
+              >
+                🤖 AIコンシェルジュを呼び出す
+              </button>
+            )}
+            {npcAvailable && npcPhase === "summoning" && (
+              <div className="flex flex-1 items-center justify-center gap-2 rounded-full bg-gray-800/90 px-5 py-2.5 text-sm text-white">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-white" />
+                {npcConfig?.spawn?.loadingMessage ??
+                  "ただいま担当者を呼び出しています…"}
+              </div>
+            )}
+            {npcAvailable && npcPhase === "active" && (
+              <form
+                onSubmit={sendNpcMessage}
+                className="flex min-w-0 flex-1 gap-2"
+              >
                 <input
+                  ref={chatInputRef}
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder={
-                    npcConfig
-                      ? "コンシェルジュに質問する…"
-                      : "コンシェルジュ設定を読み込み中…"
-                  }
+                  placeholder="コンシェルジュに質問する…"
                   className="min-w-0 flex-1 rounded-full border border-gray-600 bg-gray-900/90 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
                 />
                 <button
@@ -360,10 +422,28 @@ export const SpaceApp = () => {
         <>
           <div className="pointer-events-none fixed left-1/2 top-1/2 z-10 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/80" />
           <div className="pointer-events-none fixed bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/50 px-4 py-1.5 text-xs text-gray-200">
-            {activeSpace ? `${activeSpace.title} ・ ` : ""}WASD: 移動 ・ Shift:
-            走る{npcActive ? " ・ Esc: チャット" : " ・ Esc: 退出"}
+            {activeSpace ? `${activeSpace.title} ・ ` : ""}WASD: 移動
+            {npcPhase === "active"
+              ? " ・ NPCに照準を合わせてクリックで会話 ・ Esc: メニュー"
+              : npcAvailable
+                ? " ・ Esc: コンシェルジュ呼び出し"
+                : " ・ Esc: メニュー"}
           </div>
         </>
+      )}
+
+      {/* エラートースト */}
+      {toasts.length > 0 && (
+        <div className="pointer-events-none fixed right-4 top-4 z-30 flex w-80 flex-col gap-2">
+          {toasts.map((t, i) => (
+            <div
+              key={i}
+              className="rounded-lg bg-red-900/90 px-4 py-2 text-xs text-red-100 shadow-lg"
+            >
+              {t}
+            </div>
+          ))}
+        </div>
       )}
 
       {/* 読み込みインジケータ */}

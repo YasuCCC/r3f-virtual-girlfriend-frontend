@@ -96,7 +96,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-18";
+const BUILD_TAG = "b0719-19";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -178,6 +178,12 @@ export const SpaceApp = () => {
     const v = new URLSearchParams(window.location.search).get("lodlevel");
     return v === null ? undefined : Number(v);
   }, []);
+  // ?avatar=URL でコンシェルジュの見た目を上書き(Avaturn等のGLB/VRMの試着用)
+  const avatarOverride = useMemo(
+    () =>
+      new URLSearchParams(window.location.search).get("avatar") ?? undefined,
+    []
+  );
 
   const pushToast = (message: string) => {
     setToasts((prev) => [...prev.slice(-3), message]);
@@ -608,7 +614,9 @@ export const SpaceApp = () => {
         {activeSpace?.npc && npcPhase === "active" && (
           <NpcAvatar
             position={activeSpace.npc.position}
-            avatarUrl={resolveAssetUrl(npcConfig?.avatarConfig?.url)}
+            avatarUrl={
+              avatarOverride ?? resolveAssetUrl(npcConfig?.avatarConfig?.url)
+            }
             headLabel={
               npcStarted
                 ? npcConfig?.avatar?.headLabel

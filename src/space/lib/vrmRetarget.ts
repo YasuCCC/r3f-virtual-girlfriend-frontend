@@ -73,6 +73,22 @@ const normalizeBoneName = (name: string) => name.replace(/^mixamorig:?/, "");
  * スケールして転送する。女性用リグのモーションに含まれる位置トラックが
  * 男性型アバターの骨格比率を上書きして首が縮む問題を防ぐ
  */
+/**
+ * ターゲットリグからボーンを名前で探す。Avaturn/Mixamo系の
+ * "mixamorig"プレフィックス付きリグにも対応する
+ */
+function findTargetBone(
+  targetRoot: THREE.Object3D,
+  rawName: string
+): THREE.Object3D | null {
+  return (
+    targetRoot.getObjectByName(rawName) ??
+    targetRoot.getObjectByName(`mixamorig${rawName}`) ??
+    targetRoot.getObjectByName(`mixamorig:${rawName}`) ??
+    null
+  );
+}
+
 export function adaptClipToRig(
   clip: THREE.AnimationClip,
   sourceRoot: THREE.Object3D,
@@ -80,7 +96,7 @@ export function adaptClipToRig(
 ): THREE.AnimationClip {
   const vec = new THREE.Vector3();
   const sourceHips = sourceRoot.getObjectByName("Hips");
-  const targetHips = targetRoot.getObjectByName("Hips");
+  const targetHips = findTargetBone(targetRoot, "Hips");
   sourceHips?.updateWorldMatrix(true, false);
   targetHips?.updateWorldMatrix(true, false);
   const sourceY = sourceHips?.getWorldPosition(vec).y ?? 1;
@@ -91,19 +107,28 @@ export function adaptClipToRig(
   for (const track of clip.tracks) {
     const [rawName, property] = track.name.split(".");
     // 対象アバターに存在しないボーンのトラックは除外する
-    // (バインド警告の洪水と無駄な探索を防ぐ)
-    if (!targetRoot.getObjectByName(rawName)) continue;
+    // (バインド警告の洪水と無駄な探索を防ぐ)。プレフィックス付きリグの
+    // 場合はトラック名をそのボーン名に付け替える
+    const targetBone = findTargetBone(targetRoot, rawName);
+    if (!targetBone) continue;
+    const trackName = `${targetBone.name}.${property}`;
     if (property === "position") {
       if (normalizeBoneName(rawName) !== "Hips") continue;
       tracks.push(
         new THREE.VectorKeyframeTrack(
-          track.name,
+          trackName,
           Array.from(track.times),
           Array.from(track.values, (v) => v * hipsScale)
         )
       );
-    } else {
-      tracks.push(track);
+    } else if (track instanceof THREE.QuaternionKeyframeTrack) {
+      tracks.push(
+        new THREE.QuaternionKeyframeTrack(
+          trackName,
+          Array.from(track.times),
+          Array.from(track.values)
+        )
+      );
     }
   }
   return new THREE.AnimationClip(clip.name, clip.duration, tracks);

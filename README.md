@@ -48,6 +48,19 @@ yarn dev
   - `components/SplatLayer.tsx` — Spark(`@sparkjsdev/spark`)によるGaussian Splat読み込み
     (SOG対応・エラー時フォールバック付き)
 
+### 移植済みスペース
+
+`src/space/spaces.ts` にスペース定義(SOG URL・衝突GLB・配置・ライト)を登録すると、
+入場画面のドロップダウンから読み込めます。
+
+- **sample_room** — ローカル同梱のサンプル(衝突メッシュ付き。壁・スロープで衝突判定を確認できる)
+- **east_street01** — [Yokohama East Avenue01](https://live.arrival.space/east_street01)
+  (Arrival Space 55732136_2242 から移植。SOG・衝突GLB・配置トランスフォームは
+  Arrival の実データを使用)
+
+衝突GLBがあるスペースでは、レイキャストによる壁ブロックと地面追従(スロープ・段差)が
+効きます。デバッグ用に `?nolock` を付けるとポインターロックなしでWASD移動できます。
+
 ### Arrival Space からの移植メモ
 
 - Arrival Space のスペースは「スプラット本体(`.sog`)+ 衝突判定用 `collision.glb` +

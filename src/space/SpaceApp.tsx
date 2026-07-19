@@ -1,5 +1,5 @@
 import { Canvas } from "@react-three/fiber";
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { CollisionMesh } from "./components/CollisionMesh";
 import { GalleryRoom } from "./components/GalleryRoom";
@@ -90,6 +90,34 @@ const ArrivalSpace = ({
 
 type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
+
+/** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
+const BUILD_TAG = "b0719-3";
+
+/** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
+const DevDebugBadge = () => {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const pos = (window as unknown as Record<string, unknown>).__playerPos;
+      if (Array.isArray(pos)) {
+        setText(
+          `${BUILD_TAG} ・ camera(${pos
+            .map((v) => (v as number).toFixed(1))
+            .join(", ")})`
+        );
+      } else {
+        setText(BUILD_TAG);
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div className="pointer-events-none fixed bottom-1 right-2 z-30 font-mono text-[10px] text-white/60">
+      {text}
+    </div>
+  );
+};
 
 export const SpaceApp = () => {
   // 「クリックして空間に入る」を押したか(押した後は常に歩行・UI操作が可能)
@@ -683,6 +711,8 @@ export const SpaceApp = () => {
           ))}
         </div>
       )}
+
+      {import.meta.env.DEV && <DevDebugBadge />}
 
       {/* 読み込みインジケータ */}
       {loading && (

@@ -7,9 +7,14 @@ const RUN_SPEED = 6;
 const EYE_HEIGHT = 1.6;
 /** 壁とみなす距離(プレイヤー半径) */
 const WALL_MARGIN = 0.45;
-/** 接地レイの開始高さ(目線からの上方向オフセット) */
+/** 接地レイの開始高さ(足元からの上方向オフセット) */
 const GROUND_RAY_UP = 0.5;
-const GROUND_RAY_FAR = 8;
+/**
+ * 接地レイの探索距離。高い建物の上などに万一飛ばされても、必ず眼下の
+ * 地面を見つけて降りて来られるよう長めに取る(短いと地面を見失った時点で
+ * 高さが固定され、上空視点から復帰できなくなる)
+ */
+const GROUND_RAY_FAR = 30;
 /** 追従時にNPCと保つ距離(m) */
 const FOLLOW_DISTANCE = 3;
 /** ドラッグ視点の感度(rad/px) */
@@ -252,6 +257,14 @@ export const Player = ({
         }
         camera.rotation.set(pitch.current, yaw.current, 0);
         applyGrounding(collision, delta);
+        // NPCは登録済みの経路(地面)上を歩くため、追従中のカメラ高さは
+        // NPC基準に強制する。衝突メッシュのノイズで接地判定が狂っても
+        // 上空・地下視点には絶対にならない(最終保険)
+        camera.position.y = THREE.MathUtils.clamp(
+          camera.position.y,
+          target.y + EYE_HEIGHT - 2,
+          target.y + EYE_HEIGHT + 2
+        );
         return;
       }
     }

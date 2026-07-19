@@ -294,16 +294,17 @@ const NpcAvatarInner = ({
           </div>
         </Html>
       )}
-      {/* 会話の吹き出し: 顔を隠さないよう口の横に出す。半透明で背後も見える */}
-      {(bubbleText || thinking) && (
+      {/* 会話の吹き出し: 顔を隠さないよう口の横に半透明で出す。
+          誘導歩行中は消して景色と歩きに集中できるようにする */}
+      {(bubbleText || thinking) && !isWalking && (
         <Html
           position={[0.35, 1.85, 0]}
           distanceFactor={6}
           style={{ pointerEvents: "none" }}
         >
           <div className="relative ml-3 w-60">
-            <div className="absolute -left-1.5 top-4 h-3 w-3 rotate-45 rounded-sm bg-white/80" />
-            <div className="max-h-44 overflow-hidden rounded-2xl bg-white/80 px-3 py-2 text-xs leading-relaxed text-gray-900 shadow-lg backdrop-blur-sm">
+            <div className="absolute -left-1.5 top-4 h-3 w-3 rotate-45 rounded-sm bg-white/60" />
+            <div className="max-h-44 overflow-hidden rounded-2xl bg-white/60 px-3 py-2 text-xs leading-relaxed text-gray-900 shadow-lg backdrop-blur-sm">
               {thinking ? "考え中…" : bubbleText}
             </div>
           </div>

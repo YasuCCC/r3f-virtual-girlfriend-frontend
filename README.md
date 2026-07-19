@@ -31,8 +31,13 @@ yarn dev
 
 - 「クリックして空間に入る」ボタンで入場(ポインターロック)
 - WASD / 矢印キー: 移動、Shift: 走る、マウス: 視点、Esc: 退出
-- 入場前の画面で Gaussian Splat(`.splat`)のURLを指定すると、
-  スキャンした実空間を空間内に読み込めます
+- 入場前の画面で Gaussian Splat のURLを指定すると、スキャンした実空間を
+  空間内に読み込めます。**SOG(`.sog`)/ `.ply` / `.splat` / `.spz` / `.ksplat`
+  に対応**([Spark](https://sparkjs.dev/) による描画)
+- サンプルとして `public/splats/sample_room.sog` を同梱
+  (`@playcanvas/splat-transform` でPLYから変換したもの)。
+  Arrival Space のCDN上の `.sog` URLもそのまま指定できます
+  (別オリジンから読む場合はCORS許可が必要)
 
 ### コード構成
 
@@ -40,7 +45,17 @@ yarn dev
   - `SpaceApp.tsx` — Canvas と UI オーバーレイ
   - `components/Player.tsx` — 一人称視点の移動・ポインターロック
   - `components/GalleryRoom.tsx` — プロシージャルなギャラリー空間
-  - `components/SplatLayer.tsx` — Gaussian Splat の読み込み(エラー時フォールバック付き)
+  - `components/SplatLayer.tsx` — Spark(`@sparkjsdev/spark`)によるGaussian Splat読み込み
+    (SOG対応・エラー時フォールバック付き)
+
+### Arrival Space からの移植メモ
+
+- Arrival Space のスペースは「スプラット本体(`.sog`)+ 衝突判定用 `collision.glb` +
+  エンティティ(Gate / NPC / パネル等)」で構成されている
+- `.sog` と `collision.glb` はCDN(`ugc.arrival.space`)からダウンロードでき、
+  `.sog` は本ビューアでそのまま読み込める
+- Gate・NPC・情報パネルなどのプラグイン(Vibes)は Arrival Space 固有のため、
+  React コンポーネントとして再実装が必要
 - `yarn typecheck` で型チェックを実行できます
 
 ### 今後のロードマップ

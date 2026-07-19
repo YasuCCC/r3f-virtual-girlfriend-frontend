@@ -1,10 +1,29 @@
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, Plugin } from "vite";
+
+// Viteのasset変換は new URL("data:...", import.meta.url) のdata URIを
+// ファイルパスとして誤結合するため、変換後に元のdata URIへ戻す
+const fixSparkWasmDataUri = (): Plugin => ({
+  name: "fix-spark-wasm-data-uri",
+  enforce: "post",
+  transform(code, id) {
+    if (!id.includes("@sparkjsdev/spark")) return null;
+    if (!code.includes("data:application/wasm")) return null;
+    return code.replace(
+      /new URL\("[^"]*?(?=data:application\/wasm)/g,
+      'new URL("'
+    );
+  },
+});
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), fixSparkWasmDataUri()],
+  optimizeDeps: {
+    // 事前バンドルされると上記transformを通らないため除外する
+    exclude: ["@sparkjsdev/spark"],
+  },
   build: {
     rollupOptions: {
       input: {

@@ -4,9 +4,9 @@ import { GalleryRoom } from "./components/GalleryRoom";
 import { Player } from "./components/Player";
 import { SplatLayer } from "./components/SplatLayer";
 
-// ガウシアンスプラットのサンプル(drei公式デモで使われている公開データ)
-const SAMPLE_SPLAT_URL =
-  "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
+// ローカル同梱のサンプルSOG(splat-transformでPLYから変換したもの)。
+// Arrival SpaceのCDN上の .sog URL などもそのまま指定できる。
+const SAMPLE_SPLAT_URL = "/splats/sample_room.sog";
 
 export const SpaceApp = () => {
   const [entered, setEntered] = useState(false);
@@ -27,11 +27,9 @@ export const SpaceApp = () => {
         {splatUrl && (
           <SplatLayer
             url={splatUrl}
-            onError={() => {
+            onError={(message) => {
               setSplatUrl(null);
-              setSplatError(
-                "スプラットの読み込みに失敗しました。URLを確認してください。"
-              );
+              setSplatError(`スプラットの読み込みに失敗しました: ${message}`);
             }}
           />
         )}
@@ -58,10 +56,10 @@ export const SpaceApp = () => {
             className="pointer-events-auto flex w-full max-w-xl items-center gap-2 px-4"
           >
             <input
-              type="url"
+              type="text"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="Gaussian Splat (.splat) のURL"
+              placeholder="Gaussian Splat のURL (.sog / .ply / .splat / .spz)"
               className="min-w-0 flex-1 rounded-md border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
             />
             <button

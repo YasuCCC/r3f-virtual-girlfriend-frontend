@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { CollisionMesh } from "./components/CollisionMesh";
 import { GalleryRoom } from "./components/GalleryRoom";
 import { Player } from "./components/Player";
-import { SplatLayer } from "./components/SplatLayer";
+import { SparkRendererMount, SplatLayer } from "./components/SplatLayer";
 import { SpaceDefinition, SPACES } from "./spaces";
 
 const DEG = Math.PI / 180;
@@ -15,11 +15,13 @@ const ArrivalSpace = ({
   def,
   collisionRef,
   onSplatError,
+  onSplatLoaded,
   onCollisionError,
 }: {
   def: SpaceDefinition;
   collisionRef: React.MutableRefObject<THREE.Object3D | null>;
   onSplatError: (message: string) => void;
+  onSplatLoaded: () => void;
   onCollisionError: (message: string) => void;
 }) => {
   const lightDir = useMemo(() => {
@@ -42,7 +44,11 @@ const ArrivalSpace = ({
         scale={def.scale ?? 1}
       >
         {/* スプラットは3DGSの慣習(Y下向き)のためSplatLayer内でX軸180°反転される */}
-        <SplatLayer url={def.splatUrl} onError={onSplatError} />
+        <SplatLayer
+          url={def.splatUrl}
+          onError={onSplatError}
+          onLoaded={onSplatLoaded}
+        />
         {def.collisionUrl && (
           <group rotation={def.collisionInSplatFrame ? [Math.PI, 0, 0] : [0, 0, 0]}>
             <CollisionMesh
@@ -64,6 +70,7 @@ export const SpaceApp = () => {
   const [urlInput, setUrlInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const collisionRef = useRef<THREE.Object3D | null>(null);
 
   // デバッグ用: ?nolock でポインターロックなしでもWASD移動できる
@@ -77,6 +84,7 @@ export const SpaceApp = () => {
     if (!def) return;
     setError(null);
     setNotice(null);
+    setLoading(true);
     collisionRef.current = null;
     setActiveSpace(def);
   };
@@ -87,6 +95,7 @@ export const SpaceApp = () => {
     if (!url) return;
     setError(null);
     setNotice(null);
+    setLoading(true);
     collisionRef.current = null;
     setActiveSpace({
       id: "custom",
@@ -98,14 +107,17 @@ export const SpaceApp = () => {
   return (
     <div className="h-full w-full">
       <Canvas camera={{ position: [0, 1.6, 4], fov: 70 }}>
+        <SparkRendererMount />
         {activeSpace ? (
           <ArrivalSpace
             def={activeSpace}
             collisionRef={collisionRef}
             onSplatError={(message) => {
               setActiveSpace(null);
+              setLoading(false);
               setError(`スプラットの読み込みに失敗しました: ${message}`);
             }}
+            onSplatLoaded={() => setLoading(false)}
             onCollisionError={(message) =>
               setNotice(
                 `衝突メッシュを読み込めなかったため平面移動になります (${message})`
@@ -183,6 +195,14 @@ export const SpaceApp = () => {
           </form>
           {error && <p className="px-4 text-sm text-red-400">{error}</p>}
           {notice && <p className="px-4 text-sm text-yellow-300">{notice}</p>}
+        </div>
+      )}
+
+      {/* 読み込みインジケータ */}
+      {loading && (
+        <div className="pointer-events-none fixed left-1/2 top-6 z-20 flex -translate-x-1/2 items-center gap-3 rounded-full bg-black/70 px-5 py-2.5 text-sm text-white shadow-lg">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-white" />
+          スペースを読み込んでいます…(数十MBのデータを取得するため、しばらくお待ちください)
         </div>
       )}
 

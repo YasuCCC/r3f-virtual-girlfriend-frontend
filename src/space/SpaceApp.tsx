@@ -1,5 +1,5 @@
 import { Canvas } from "@react-three/fiber";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { CollisionMesh } from "./components/CollisionMesh";
 import { GalleryRoom } from "./components/GalleryRoom";
@@ -10,11 +10,13 @@ import { SparkRendererMount, SplatLayer } from "./components/SplatLayer";
 import {
   buildGuidePath,
   buildGuideTargets,
+  buildShopPersonaConfig,
   ChatTurn,
   fetchNpcConfig,
-  GuidePoint,
+  GuideTarget,
   NpcConfig,
   sendChat,
+  ShopNpc,
   synthesizeVoice,
 } from "./npc/api";
 import { SpaceDefinition, SPACES } from "./spaces";
@@ -87,10 +89,11 @@ const ArrivalSpace = ({
 };
 
 type NpcPhase = "hidden" | "summoning" | "active";
+type Speaker = "concierge" | "shop";
 
 export const SpaceApp = () => {
-  const [entered, setEntered] = useState(false);
-  const [enteredOnce, setEnteredOnce] = useState(false);
+  // 「クリックして空間に入る」を押したか(押した後は常に歩行・UI操作が可能)
+  const [started, setStarted] = useState(false);
   const [activeSpace, setActiveSpace] = useState<SpaceDefinition | null>(null);
   const [selectedId, setSelectedId] = useState(SPACES[0].id);
   const [urlInput, setUrlInput] = useState("");
@@ -99,7 +102,6 @@ export const SpaceApp = () => {
   const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<string[]>([]);
   const collisionRef = useRef<THREE.Object3D | null>(null);
-  const lockRef = useRef<(() => void) | null>(null);
 
   // NPCコンシェルジュの状態
   const [npcPhase, setNpcPhase] = useState<NpcPhase>("hidden");
@@ -108,6 +110,7 @@ export const SpaceApp = () => {
   const [npcBubble, setNpcBubble] = useState<string | null>(null);
   const [npcThinking, setNpcThinking] = useState(false);
   const [npcSpeaking, setNpcSpeaking] = useState(false);
+  const [speaker, setSpeaker] = useState<Speaker>("concierge");
   const [chatInput, setChatInput] = useState("");
   const npcHistory = useRef<ChatTurn[]>([]);
   const npcAudio = useRef<HTMLAudioElement | null>(null);
@@ -115,18 +118,17 @@ export const SpaceApp = () => {
   const summonSeq = useRef(0);
   const [npcWalk, setNpcWalk] = useState<NpcWalkCommand | null>(null);
   const walkSeq = useRef(0);
-  const activeGuide = useRef<GuidePoint | null>(null);
+  const activeGuide = useRef<GuideTarget | null>(null);
+  // 店舗到着後は店主NPCが応対する
+  const [activeShop, setActiveShop] = useState<ShopNpc | null>(null);
+  const [shopBubble, setShopBubble] = useState<string | null>(null);
+  const activeShopRef = useRef<ShopNpc | null>(null);
   // 誘導中のユーザー自動追従(WASD操作で解除)
   const followRef = useRef({ active: false, speed: 3 });
   const npcPosRef = useRef(new THREE.Vector3());
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
-  // デバッグ用: ?nolock でポインターロックなしでもWASD移動できる
-  const requireLock = useMemo(
-    () => !new URLSearchParams(window.location.search).has("nolock"),
-    []
-  );
   // ?lodlevel=0〜4 でLODレベルを上書き(0=最精細)
   const lodLevelOverride = useMemo(() => {
     const v = new URLSearchParams(window.location.search).get("lodlevel");
@@ -138,12 +140,21 @@ export const SpaceApp = () => {
     setTimeout(() => setToasts((prev) => prev.slice(1)), 8000);
   };
 
-  const playNpcAudio = async (text: string) => {
+  // playNpcAudio内で最新configを参照するためのref
+  const npcConfigRef = useRef<NpcConfig | null>(null);
+
+  const currentPersona = (): NpcConfig | null =>
+    activeShopRef.current
+      ? buildShopPersonaConfig(activeShopRef.current, npcConfigRef.current)
+      : npcConfigRef.current;
+
+  const playNpcAudio = async (text: string, who: Speaker) => {
     try {
-      const audio = await synthesizeVoice(text, npcConfigRef.current);
+      const audio = await synthesizeVoice(text, currentPersona());
       if (!audio) return;
       npcAudio.current?.pause();
       npcAudio.current = audio;
+      setSpeaker(who);
       setNpcSpeaking(true);
       audio.onended = () => setNpcSpeaking(false);
       audio.onerror = () => setNpcSpeaking(false);
@@ -152,8 +163,6 @@ export const SpaceApp = () => {
       setNpcSpeaking(false);
     }
   };
-  // playNpcAudio内で最新configを参照するためのref
-  const npcConfigRef = useRef<NpcConfig | null>(null);
 
   const resetNpc = () => {
     summonSeq.current++;
@@ -163,6 +172,7 @@ export const SpaceApp = () => {
     npcConfigRef.current = null;
     npcStartedRef.current = false;
     activeGuide.current = null;
+    activeShopRef.current = null;
     followRef.current.active = false;
     recognitionRef.current?.stop();
     setNpcWalk(null);
@@ -170,6 +180,8 @@ export const SpaceApp = () => {
     setNpcStarted(false);
     setNpcConfig(null);
     setNpcBubble(null);
+    setActiveShop(null);
+    setShopBubble(null);
     setNpcThinking(false);
     setNpcSpeaking(false);
   };
@@ -213,42 +225,71 @@ export const SpaceApp = () => {
         (staff ? `こんにちは。${staff}です。` : "こんにちは。") +
         (cfg?.greeting?.message ?? "");
       setNpcBubble(greet);
-      void playNpcAudio(greet);
+      void playNpcAudio(greet, "concierge");
     }
     setTimeout(() => chatInputRef.current?.focus(), 100);
   };
 
-  // 歩行中(ポインターロック中)はクリックできないため、Cキーでも呼び出せる
-  const summonRef = useRef(summonNpc);
-  summonRef.current = summonNpc;
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code !== "KeyC") return;
-      const el = document.activeElement;
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
-        return;
-      // 歩行(ポインターロック)は維持したままNPCを登場させる
-      void summonRef.current();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  /** 店主NPCクリック: 入力欄にフォーカス(応対はすでに店舗ペルソナ) */
+  const handleShopActivate = () => {
+    setTimeout(() => chatInputRef.current?.focus(), 100);
+  };
 
-  // 空間(canvas)クリックで歩行を再開できるようにする。
-  // NPCへのクリックはNpcAvatar側がcaptureで先に処理して止めるため、ここには来ない。
-  const enteredOnceRef = useRef(false);
-  enteredOnceRef.current = enteredOnce;
-  useEffect(() => {
-    if (!requireLock) return;
-    const onMouseDown = (e: MouseEvent) => {
-      if (document.pointerLockElement) return;
-      if (!enteredOnceRef.current) return;
-      if (!(e.target instanceof HTMLCanvasElement)) return;
-      lockRef.current?.();
-    };
-    window.addEventListener("mousedown", onMouseDown);
-    return () => window.removeEventListener("mousedown", onMouseDown);
-  }, [requireLock]);
+  /** 店主との会話を終えてコンシェルジュに戻る */
+  const returnToConcierge = () => {
+    activeShopRef.current = null;
+    setActiveShop(null);
+    setShopBubble(null);
+    setNpcBubble("他にご案内できることはありますか?");
+  };
+
+  /** 行き先案内: walkはNPCが誘導歩行、spaceUrlはスペース移動/リンク */
+  const startGuide = (gp: GuideTarget) => {
+    if (gp.type === "spaceUrl" && gp.spaceUrl) {
+      const slug = gp.spaceUrl.replace(/\/+$/, "").split("/").pop() ?? "";
+      const target = SPACES.find((s) => s.id === slug);
+      if (target) {
+        loadSpace(target);
+      } else {
+        window.open(gp.spaceUrl, "_blank", "noopener");
+      }
+      return;
+    }
+    const path = buildGuidePath(gp);
+    if (path.length === 0) return;
+    // 新しい誘導を始めたら店舗応対は解除
+    activeShopRef.current = null;
+    setActiveShop(null);
+    setShopBubble(null);
+    activeGuide.current = gp;
+    if (gp.guideMessage) {
+      setNpcBubble(gp.guideMessage);
+      void playNpcAudio(gp.guideMessage, "concierge");
+    }
+    const speed = npcConfigRef.current?.walkSpeed ?? 3;
+    setNpcWalk({ id: ++walkSeq.current, path, speed });
+    // ユーザー視点もNPCについて行く(WASDを押すと解除)
+    followRef.current = { active: true, speed };
+  };
+
+  const onNpcWalkDone = () => {
+    followRef.current.active = false;
+    const gp = activeGuide.current;
+    activeGuide.current = null;
+    if (!gp) return;
+    if (gp.shop) {
+      // 店舗に到着: 店主NPCが現れて挨拶し、以降の質問は店主が回答する
+      activeShopRef.current = gp.shop;
+      setActiveShop(gp.shop);
+      setNpcBubble(null);
+      const greet = gp.shop.greeting || `いらっしゃいませ。${gp.shop.name}です。`;
+      setShopBubble(greet);
+      void playNpcAudio(greet, "shop");
+    } else if (gp.arrivalMessage) {
+      setNpcBubble(gp.arrivalMessage);
+      void playNpcAudio(gp.arrivalMessage, "concierge");
+    }
+  };
 
   const loadSpace = (def: SpaceDefinition) => {
     setError(null);
@@ -272,41 +313,6 @@ export const SpaceApp = () => {
     if (!url) return;
     if (activeSpace?.id === "custom" && activeSpace.splatUrl === url) return;
     loadSpace({ id: "custom", title: "カスタムURL", splatUrl: url });
-  };
-
-  /** 行き先案内: walkはNPCが誘導歩行、spaceUrlはスペース移動/リンク */
-  const startGuide = (gp: GuidePoint) => {
-    if (gp.type === "spaceUrl" && gp.spaceUrl) {
-      const slug = gp.spaceUrl.replace(/\/+$/, "").split("/").pop() ?? "";
-      const target = SPACES.find((s) => s.id === slug);
-      if (target) {
-        loadSpace(target);
-      } else {
-        window.open(gp.spaceUrl, "_blank", "noopener");
-      }
-      return;
-    }
-    const path = buildGuidePath(gp);
-    if (path.length === 0) return;
-    activeGuide.current = gp;
-    if (gp.guideMessage) {
-      setNpcBubble(gp.guideMessage);
-      void playNpcAudio(gp.guideMessage);
-    }
-    const speed = npcConfigRef.current?.walkSpeed ?? 3;
-    setNpcWalk({ id: ++walkSeq.current, path, speed });
-    // ユーザー視点もNPCについて行く(WASDを押すと解除)
-    followRef.current = { active: true, speed };
-  };
-
-  const onNpcWalkDone = () => {
-    followRef.current.active = false;
-    const gp = activeGuide.current;
-    activeGuide.current = null;
-    if (gp?.arrivalMessage) {
-      setNpcBubble(gp.arrivalMessage);
-      void playNpcAudio(gp.arrivalMessage);
-    }
   };
 
   /** 音声入力(Web Speech API)。認識結果をそのまま質問として送信する */
@@ -366,12 +372,13 @@ export const SpaceApp = () => {
   const submitNpcMessage = async (raw: string) => {
     const message = raw.trim();
     if (!message || npcThinking || npcPhase !== "active") return;
+    const shopAtSend = activeShopRef.current;
     setChatInput("");
     setNpcThinking(true);
     try {
       const reply = await sendChat({
         message,
-        config: npcConfig,
+        config: currentPersona(),
         history: npcHistory.current,
       });
       npcHistory.current = [
@@ -379,13 +386,20 @@ export const SpaceApp = () => {
         { role: "user", content: message },
         { role: "assistant", content: reply },
       ];
-      setNpcBubble(reply);
       setNpcThinking(false);
-      void playNpcAudio(reply);
+      if (shopAtSend) {
+        setShopBubble(reply);
+        void playNpcAudio(reply, "shop");
+      } else {
+        setNpcBubble(reply);
+        void playNpcAudio(reply, "concierge");
+      }
     } catch (err) {
       setNpcThinking(false);
       const detail = err instanceof Error ? err.message : String(err);
-      setNpcBubble(npcConfig?.fallback?.message ?? "申し訳ありません。");
+      const fallback = npcConfig?.fallback?.message ?? "申し訳ありません。";
+      if (shopAtSend) setShopBubble(fallback);
+      else setNpcBubble(fallback);
       pushToast(`チャットAPIエラー: ${detail}`);
     }
   };
@@ -422,9 +436,9 @@ export const SpaceApp = () => {
             position={activeSpace.npc.position}
             headLabel={npcConfig?.avatar?.headLabel}
             headLabelColor={npcConfig?.avatar?.headLabelColor}
-            speaking={npcSpeaking}
+            speaking={npcSpeaking && speaker === "concierge"}
             bubbleText={npcBubble}
-            thinking={npcThinking}
+            thinking={npcThinking && !activeShop}
             onActivate={handleNpcActivate}
             onError={(message) => pushToast(`NPC表示エラー: ${message}`)}
             walk={npcWalk}
@@ -432,27 +446,34 @@ export const SpaceApp = () => {
             positionRef={npcPosRef}
           />
         )}
+        {activeShop && (
+          <NpcAvatar
+            position={[
+              activeShop.x ?? 0,
+              activeShop.y ?? 0,
+              activeShop.z ?? 0,
+            ]}
+            headLabel={activeShop.name}
+            headLabelColor="#d97706"
+            speaking={npcSpeaking && speaker === "shop"}
+            bubbleText={shopBubble}
+            thinking={npcThinking && Boolean(activeShop)}
+            onActivate={handleShopActivate}
+            onError={(message) => pushToast(`店舗NPC表示エラー: ${message}`)}
+          />
+        )}
         <Player
-          onLockChange={(locked) => {
-            setEntered(locked);
-            if (locked) {
-              setEnteredOnce(true);
-              // 歩行再開時にチャット入力へのキー入力が流れないようフォーカスを外す
-              chatInputRef.current?.blur();
-            }
-          }}
+          active={started}
           collisionRef={collisionRef}
           spawn={activeSpace?.spawn ?? [0, 1.6, 4]}
           spawnYawDeg={activeSpace?.spawnYawDeg ?? 0}
-          requireLock={requireLock}
-          lockRef={lockRef}
           followRef={followRef}
           followTargetRef={npcPosRef}
         />
       </Canvas>
 
-      {/* 初回入場前のフルオーバーレイ */}
-      {!entered && !enteredOnce && (
+      {/* 入場前のフルオーバーレイ */}
+      {!started && (
         <div className="pointer-events-none fixed inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-black/60">
           <h1 className="text-3xl font-bold text-white">Space Prototype</h1>
           {activeSpace && (
@@ -461,13 +482,14 @@ export const SpaceApp = () => {
             </p>
           )}
           <button
-            id="enter-space"
+            type="button"
+            onClick={() => setStarted(true)}
             className="pointer-events-auto rounded-full bg-indigo-500 px-8 py-3 text-lg font-semibold text-white shadow-lg transition hover:bg-indigo-400"
           >
             クリックして空間に入る
           </button>
           <p className="text-sm text-gray-300">
-            WASD / 矢印キー: 移動 ・ Shift: 走る ・ マウス: 視点 ・ Esc: メニュー
+            ドラッグ: 視点 ・ WASD / 矢印キー: 移動 ・ Shift: 走る
           </p>
 
           <div className="pointer-events-auto flex w-full max-w-xl items-center gap-2 px-4">
@@ -514,16 +536,15 @@ export const SpaceApp = () => {
         </div>
       )}
 
-      {/* 入場後にEscで抜けたとき: シーンを隠さないコンパクトバー
-          (?nolockデバッグ時はスペース読込後に常時表示) */}
-      {!entered && (enteredOnce || (!requireLock && activeSpace)) && (
+      {/* 入場後の下部バー(カーソルは常に使えるので開閉不要) */}
+      {started && (
         <div className="fixed inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 p-4">
           {error && (
             <p className="rounded bg-black/60 px-3 py-1 text-sm text-red-400">
               {error}
             </p>
           )}
-          <div className="flex w-full max-w-2xl items-center justify-end gap-2">
+          <div className="flex w-full max-w-2xl items-center gap-2">
             {npcAvailable && npcPhase === "active" && npcStarted && (
               <form
                 onSubmit={sendNpcMessage}
@@ -534,7 +555,11 @@ export const SpaceApp = () => {
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="コンシェルジュに質問する…"
+                  placeholder={
+                    activeShop
+                      ? `${activeShop.name}に質問する…`
+                      : "コンシェルジュに質問する…"
+                  }
                   className="min-w-0 flex-1 rounded-full border border-gray-600 bg-gray-900/90 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
                 />
                 <button
@@ -556,25 +581,27 @@ export const SpaceApp = () => {
                 >
                   🎤
                 </button>
+                {activeShop && (
+                  <button
+                    type="button"
+                    onClick={returnToConcierge}
+                    className="whitespace-nowrap rounded-full bg-gray-700/90 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-gray-600"
+                  >
+                    案内人に戻る
+                  </button>
+                )}
               </form>
             )}
-            <button
-              type="button"
-              onClick={() => lockRef.current?.()}
-              className="whitespace-nowrap rounded-full bg-gray-700/90 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-gray-600"
-            >
-              移動を再開
-            </button>
           </div>
         </div>
       )}
 
       {/* 中央の呼び出しバナー(Arrivalの「タップしてAIコンシェルジュを呼び出す」相当) */}
-      {npcAvailable &&
+      {started &&
+        npcAvailable &&
         (npcPhase !== "active" || !npcStarted) &&
-        !loading &&
-        (entered || enteredOnce || !requireLock) && (
-          <div className="pointer-events-none fixed left-1/2 top-24 z-20 -translate-x-1/2">
+        !loading && (
+          <div className="pointer-events-none fixed left-1/2 top-16 z-20 -translate-x-1/2">
             {npcPhase === "active" ? (
               <div className="rounded-full border-2 border-cyan-400/80 bg-black/75 px-6 py-3 text-center text-sm text-white shadow-xl">
                 💬 AIコンシェルジュをクリックして会話をはじめてください
@@ -584,14 +611,6 @@ export const SpaceApp = () => {
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-cyan-300" />
                 {npcConfig?.spawn?.loadingMessage ??
                   "ただいま担当者を呼び出しています…"}
-              </div>
-            ) : entered ? (
-              <div className="rounded-full border-2 border-cyan-400/80 bg-black/75 px-6 py-3 text-center text-sm text-white shadow-xl">
-                🤖{" "}
-                <span className="mx-1 rounded bg-cyan-500/30 px-1.5 py-0.5 font-bold text-cyan-200">
-                  C
-                </span>
-                キーでAIコンシェルジュを呼び出す
               </div>
             ) : (
               <button
@@ -608,23 +627,16 @@ export const SpaceApp = () => {
           </div>
         )}
 
-      {/* 入場中のHUD */}
-      {entered && (
-        <>
-          <div className="pointer-events-none fixed left-1/2 top-1/2 z-10 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/80" />
-          <div className="pointer-events-none fixed bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/50 px-4 py-1.5 text-xs text-gray-200">
-            {activeSpace ? `${activeSpace.title} ・ ` : ""}WASD: 移動
-            {npcPhase === "active"
-              ? " ・ NPCに照準を合わせてクリックで会話 ・ Esc: メニュー"
-              : npcAvailable && npcPhase === "hidden"
-                ? " ・ C: コンシェルジュ呼び出し ・ Esc: メニュー"
-                : " ・ Esc: メニュー"}
-          </div>
-        </>
+      {/* 操作ヒント */}
+      {started && (
+        <div className="pointer-events-none fixed bottom-20 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/50 px-4 py-1.5 text-xs text-gray-200">
+          {activeSpace ? `${activeSpace.title} ・ ` : ""}
+          ドラッグ: 視点 ・ WASD: 移動 ・ Shift: 走る
+        </div>
       )}
 
       {/* 行き先パネル(guidePoints + 誘導ONの店舗NPC) */}
-      {!entered &&
+      {started &&
         npcPhase === "active" &&
         npcStarted &&
         guideTargets.length > 0 && (

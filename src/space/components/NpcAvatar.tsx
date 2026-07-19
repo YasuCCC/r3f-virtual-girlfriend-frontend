@@ -10,11 +10,13 @@ import {
 } from "react";
 import * as THREE from "three";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
-import {
-  buildWalkClip,
-  WALK_CLIP_BASE_SPEED,
-  WALK_CLIP_NAME,
-} from "../lib/walkClip";
+
+// Ready Player Me公式アニメーションライブラリの歩行モーション
+// (https://github.com/readyplayerme/animation-library)
+const WALK_URL = "/animations/F_Walk_002.glb";
+const WALK_CLIP_NAME = "F_Walk_002";
+/** F_Walk_002が表現するおおよその歩行速度(m/s)。timeScale同期に使う */
+const WALK_CLIP_BASE_SPEED = 1.3;
 
 const AVATAR_URL = "/models/64f1a714fe61576b46f27ca2.glb";
 const ANIMATIONS_URL = "/models/animations.glb";
@@ -69,10 +71,10 @@ const NpcAvatarInner = ({
   // 既存アバターアプリと同じGLBを使うため、シーンを複製して干渉を避ける
   const avatar = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { animations } = useGLTF(ANIMATIONS_URL);
-  // 歩行モーションは資産にないため、ボーン基準ポーズから合成する
+  const { animations: walkAnimations } = useGLTF(WALK_URL);
   const allAnimations = useMemo(
-    () => [...animations, buildWalkClip(avatar)],
-    [animations, avatar]
+    () => [...animations, ...walkAnimations],
+    [animations, walkAnimations]
   );
   const { actions } = useAnimations(allAnimations, group);
   const [isWalking, setIsWalking] = useState(false);
@@ -99,38 +101,41 @@ const NpcAvatarInner = ({
   }, [animationName, actions]);
 
   // NPCへのクリック判定(自前レイキャスト)。
-  // - ポインターロック中: 画面中央の照準がNPCに合った状態でクリック
-  // - 非ロック時: マウスカーソル位置でクリック(canvas上のみ)
+  // ドラッグ視点回転と区別するため「ほぼ動かないmousedown→mouseup」だけを
+  // クリックとして扱う
   useEffect(() => {
     if (!onActivate) return;
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    const onMouseDown = (e: MouseEvent) => {
-      if (!group.current) return;
-      if (document.pointerLockElement) {
-        pointer.set(0, 0);
-      } else {
-        // DOMボタン等へのクリックは無視し、canvas直上のクリックだけを拾う
-        if (!(e.target instanceof HTMLCanvasElement)) return;
-        pointer.set(
-          (e.clientX / window.innerWidth) * 2 - 1,
-          -(e.clientY / window.innerHeight) * 2 + 1
-        );
-      }
+    let downAt: { x: number; y: number } | null = null;
+    const hitTest = (e: MouseEvent) => {
+      if (!group.current) return false;
+      pointer.set(
+        (e.clientX / window.innerWidth) * 2 - 1,
+        -(e.clientY / window.innerHeight) * 2 + 1
+      );
       raycaster.setFromCamera(pointer, camera);
       raycaster.far = ACTIVATE_DISTANCE;
-      const hits = raycaster.intersectObject(group.current, true);
-      if (hits.length > 0) {
-        // 「canvasクリックで歩行再開」のリスナーに横取りされないよう止める
-        e.stopImmediatePropagation();
-        document.exitPointerLock?.();
-        onActivate();
-      }
+      return raycaster.intersectObject(group.current, true).length > 0;
     };
-    // captureで他のクリックリスナーより先に判定する
-    window.addEventListener("mousedown", onMouseDown, { capture: true });
-    return () =>
-      window.removeEventListener("mousedown", onMouseDown, { capture: true });
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0 || !(e.target instanceof HTMLCanvasElement)) return;
+      downAt = { x: e.clientX, y: e.clientY };
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (!downAt) return;
+      const moved =
+        Math.abs(e.clientX - downAt.x) + Math.abs(e.clientY - downAt.y);
+      downAt = null;
+      if (moved > 6) return; // ドラッグは視点回転
+      if (hitTest(e)) onActivate();
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
   }, [camera, onActivate]);
 
   // 誘導歩行コマンドを受け取ったら経路をセットする

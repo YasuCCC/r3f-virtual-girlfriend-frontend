@@ -46,15 +46,40 @@ export type ShopNpc = {
   guideKeywords?: string;
   greeting?: string;
   knowledge?: string;
+  knowledgeCachedText?: string;
   avatarUrl?: string;
+  voice?: NpcConfig["voice"];
 };
+
+/**
+ * 店舗NPC(店主)の会話ペルソナ。到着後の質問はこの設定で回答する
+ * (Arrivalプラグインの_personaConfigの店舗分岐と同等)
+ */
+export function buildShopPersonaConfig(
+  shop: ShopNpc,
+  base: NpcConfig | null
+): NpcConfig {
+  const cachedText = [shop.knowledge?.trim(), shop.knowledgeCachedText?.trim()]
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+  return {
+    language: base?.language,
+    readings: base?.readings,
+    fallback: base?.fallback,
+    greeting: { staffName: shop.name || "店員", companyName: "" },
+    knowledge: { cachedText },
+    voice: shop.voice ?? base?.voice,
+  };
+}
 
 /**
  * 行き先リスト = guidePoints + 誘導ONの店舗NPC(Arrivalの行き先パネルと同じ構成)。
  * 店舗は「店へ歩いて案内 → 到着時に店の挨拶」というGuidePointに変換する。
  */
-export function buildGuideTargets(config: NpcConfig | null): GuidePoint[] {
-  const shops: GuidePoint[] = (config?.shopNpcs ?? [])
+export type GuideTarget = GuidePoint & { shop?: ShopNpc };
+
+export function buildGuideTargets(config: NpcConfig | null): GuideTarget[] {
+  const shops: GuideTarget[] = (config?.shopNpcs ?? [])
     .filter((s) => s.guideEnabled && s.name)
     .map((s) => ({
       name: s.name,
@@ -65,8 +90,8 @@ export function buildGuideTargets(config: NpcConfig | null): GuidePoint[] {
       z: s.z,
       keywords: s.guideKeywords,
       guideMessage: `「${s.name}」にご案内しますね。ついて来てください。`,
-      arrivalMessage: s.greeting || `こちらが「${s.name}」です。`,
       waypoints: "",
+      shop: s,
     }));
   return [...shops, ...(config?.guidePoints ?? [])];
 }

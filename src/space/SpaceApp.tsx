@@ -21,6 +21,7 @@ import {
   synthesizeVoice,
   TourRoute,
 } from "./npc/api";
+import { createSpeechLevelSource } from "./lib/lipsync";
 import { SpaceDefinition, SPACES } from "./spaces";
 
 const DEG = Math.PI / 180;
@@ -94,7 +95,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-13";
+const BUILD_TAG = "b0719-14";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -144,6 +145,8 @@ export const SpaceApp = () => {
   const [chatInput, setChatInput] = useState("");
   const npcHistory = useRef<ChatTurn[]>([]);
   const npcAudio = useRef<HTMLAudioElement | null>(null);
+  /** 再生中音声の音量を返す関数(リップシンク用) */
+  const speechLevelRef = useRef<(() => number) | null>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const summonSeq = useRef(0);
   const [npcWalk, setNpcWalk] = useState<NpcWalkCommand | null>(null);
@@ -195,6 +198,7 @@ export const SpaceApp = () => {
       if (!audio) return;
       npcAudio.current?.pause();
       npcAudio.current = audio;
+      speechLevelRef.current = createSpeechLevelSource(audio);
       setSpeaker(who);
       setNpcSpeaking(true);
       await new Promise<void>((resolve) => {
@@ -612,6 +616,7 @@ export const SpaceApp = () => {
             onWalkDone={onNpcWalkDone}
             positionRef={npcPosRef}
             trailRef={npcTrailRef}
+            speechLevelRef={speechLevelRef}
           />
         )}
         {activeShop && (
@@ -629,6 +634,7 @@ export const SpaceApp = () => {
             thinking={npcThinking && Boolean(activeShop)}
             onActivate={handleShopActivate}
             onError={(message) => pushToast(`店舗NPC表示エラー: ${message}`)}
+            speechLevelRef={speechLevelRef}
           />
         )}
         {/* 次の店へ移動中も、離れるまでは前の店主が見送りとして残る */}

@@ -111,6 +111,8 @@ type NpcAvatarProps = {
   trailRef?: React.MutableRefObject<THREE.Vector3[]>;
   /** 光のバリアで囲んで目立たせる(会話開始前のクリック誘導) */
   highlight?: boolean;
+  /** 再生中音声の音量を返す関数(リップシンク用。speaking中のみ使用) */
+  speechLevelRef?: React.MutableRefObject<(() => number) | null>;
 };
 
 const NpcAvatarInner = ({
@@ -127,6 +129,7 @@ const NpcAvatarInner = ({
   positionRef,
   trailRef,
   highlight,
+  speechLevelRef,
 }: NpcAvatarProps) => {
   const group = useRef<THREE.Group>(null);
   // 誘導歩行の進行状態(経路の残りウェイポイント)
@@ -194,6 +197,32 @@ const NpcAvatarInner = ({
   }, [vrm, animations, walkAnimations, animRig, walkRig, avatar]);
   const { actions } = useAnimations(allAnimations, group);
   const [isWalking, setIsWalking] = useState(false);
+
+  // 表情用: モーフターゲットを持つメッシュ(GLBのWolf3D系)
+  const morphMeshes = useMemo(() => {
+    const meshes: THREE.SkinnedMesh[] = [];
+    avatar.traverse((o) => {
+      const mesh = o as THREE.SkinnedMesh;
+      if (mesh.isSkinnedMesh && mesh.morphTargetDictionary) meshes.push(mesh);
+    });
+    return meshes;
+  }, [avatar]);
+  const nextBlinkAt = useRef(0);
+  const blinkUntil = useRef(0);
+  const mouthLevel = useRef(0);
+
+  /** 候補名のうち存在する最初のモーフをlerpで動かす */
+  const lerpMorph = (names: string[], value: number, speed: number) => {
+    for (const mesh of morphMeshes) {
+      const dict = mesh.morphTargetDictionary;
+      const influences = mesh.morphTargetInfluences;
+      if (!dict || !influences) continue;
+      const name = names.find((n) => dict[n] !== undefined);
+      if (name === undefined) continue;
+      const idx = dict[name];
+      influences[idx] = THREE.MathUtils.lerp(influences[idx], value, speed);
+    }
+  };
 
   const animationName = useMemo(() => {
     if (isWalking) return WALK_CLIP_NAME;
@@ -269,9 +298,50 @@ const NpcAvatarInner = ({
   }, [walk]);
 
   // 歩行中は進行方向へ移動、待機中はプレイヤー(カメラ)の方をゆっくり向く
-  useFrame((_, rawDelta) => {
+  useFrame((state, rawDelta) => {
     if (!group.current) return;
     const delta = Math.min(rawDelta, 0.1);
+    const now = state.clock.elapsedTime;
+
+    // --- まばたき(2〜6秒ごとに一瞬閉じる) ---
+    if (now > nextBlinkAt.current) {
+      blinkUntil.current = now + 0.15;
+      nextBlinkAt.current = now + 2 + Math.random() * 4;
+    }
+    const blink = now < blinkUntil.current ? 1 : 0;
+
+    // --- リップシンク: 音声の音量に合わせて口を開く ---
+    let mouthTarget = 0;
+    if (speaking) {
+      const level = speechLevelRef?.current?.() ?? -1;
+      mouthTarget =
+        level >= 0
+          ? Math.min(1, level * 1.6)
+          : // 音量解析が使えない環境では擬似的に口を動かす
+            THREE.MathUtils.clamp(
+              0.3 + 0.25 * Math.sin(now * 9) + 0.15 * Math.sin(now * 23),
+              0,
+              1
+            );
+    }
+    mouthLevel.current += (mouthTarget - mouthLevel.current) * Math.min(1, delta * 18);
+
+    if (vrm) {
+      const em = vrm.expressionManager;
+      if (em) {
+        em.setValue("blink", blink);
+        em.setValue("aa", mouthLevel.current);
+      }
+    } else {
+      lerpMorph(["eyeBlinkLeft", "eyesClosed"], blink, 0.6);
+      lerpMorph(["eyeBlinkRight"], blink, 0.6);
+      lerpMorph(
+        ["viseme_aa", "viseme_AA", "mouthOpen", "jawOpen"],
+        mouthLevel.current,
+        0.5
+      );
+      lerpMorph(["viseme_O", "viseme_o"], mouthLevel.current * 0.3, 0.5);
+    }
     let targetYaw: number;
 
     if (walkQueue.current.length > 0) {

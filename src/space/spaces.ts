@@ -76,10 +76,14 @@ export const SPACES: SpaceDefinition[] = [
       "/arrival-cdn/55732136/881dbc6cb75073296b30763e89ad95464030f9389664c20edce6d1569838d920_49c18498ea8c26252e629c1418df9d505cbbcf57f81fbbfe72b42167992dc0ec_yokohama-2_collision.glb",
     // centerPosition (-0.366, -0.341, 19.899) + assetYOffset 0.2
     position: [-0.366, -0.141, 19.899],
-    // centerRotation.y = 53.13 (z=180はスプラットの上下反転として適用済み)
-    rotationYDeg: 53.13,
+    // Arrivalの centerRotation は (x=0, y=53.13, z=180)。
+    // PlayCanvasのオイラー角(ZYX順)を「X軸180°反転+Y回転」に変換すると
+    // Rz(180)·Ry(y) = Ry(180-y)·Rx(180) なので Y回転 = 180 - 53.13
+    // (k_hallのように x=±180, z=0 の場合は Y回転 = y をそのまま使う)
+    rotationYDeg: 180 - 53.13,
     scale: 1.25,
-    spawn: [0, 1.6, 0],
+    // Arrivalで実測したスポーン位置 (0.08, -0.15, -7.00) + 目線1.6m
+    spawn: [0.08, 1.45, -7.0],
     light: { type: "directional", rotationDeg: 275, intensity: 1.3 },
   },
 ];

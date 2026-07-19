@@ -21,6 +21,8 @@ export type NpcConfig = {
     speed?: number;
   };
   avatar?: { headLabel?: string; headLabelColor?: string };
+  /** コンシェルジュの見た目(.vrm / .glb のURL) */
+  avatarConfig?: { url?: string; type?: string; gender?: string };
   fallback?: { message?: string };
   readings?: Record<string, string>;
   spawn?: {
@@ -148,6 +150,17 @@ export function buildGuidePath(gp: GuidePoint): [number, number, number][] {
 }
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
+
+/**
+ * ArrivalのCDN/UGCのURLを開発サーバのプロキシ経由に変換する(CORS回避)。
+ * それ以外のURLはそのまま返す
+ */
+export function resolveAssetUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  return url
+    .replace(/^https?:\/\/dzrmwng2ae8bq\.cloudfront\.net\//, "/arrival-cdn/")
+    .replace(/^https?:\/\/ugc\.arrival\.space\//, "/arrival-ugc/");
+}
 
 export async function fetchNpcConfig(
   spaceId: string

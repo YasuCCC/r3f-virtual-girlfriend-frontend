@@ -15,6 +15,7 @@ import {
   fetchNpcConfig,
   GuideTarget,
   NpcConfig,
+  resolveAssetUrl,
   sendChat,
   ShopNpc,
   synthesizeVoice,
@@ -93,7 +94,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-11";
+const BUILD_TAG = "b0719-12";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -594,6 +595,7 @@ export const SpaceApp = () => {
         {activeSpace?.npc && npcPhase === "active" && (
           <NpcAvatar
             position={activeSpace.npc.position}
+            avatarUrl={resolveAssetUrl(npcConfig?.avatarConfig?.url)}
             headLabel={
               npcStarted
                 ? npcConfig?.avatar?.headLabel
@@ -619,6 +621,7 @@ export const SpaceApp = () => {
               activeShop.y ?? 0,
               activeShop.z ?? 0,
             ]}
+            avatarUrl={resolveAssetUrl(activeShop.avatarUrl)}
             headLabel={activeShop.name}
             headLabelColor="#d97706"
             speaking={npcSpeaking && speaker === "shop"}
@@ -636,6 +639,7 @@ export const SpaceApp = () => {
               lingeringShop.y ?? 0,
               lingeringShop.z ?? 0,
             ]}
+            avatarUrl={resolveAssetUrl(lingeringShop.avatarUrl)}
             headLabel={lingeringShop.name}
             headLabelColor="#d97706"
             speaking={false}

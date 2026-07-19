@@ -1,3 +1,4 @@
+import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import { Html, useAnimations, useGLTF } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import {
@@ -9,7 +10,9 @@ import {
   useState,
 } from "react";
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
+import { retargetClipToVrm } from "../lib/vrmRetarget";
 
 // Ready Player Me公式アニメーションライブラリの歩行モーション
 // (https://github.com/readyplayerme/animation-library)
@@ -25,6 +28,11 @@ const AVATAR_URL = "/models/64f1a714fe61576b46f27ca2.glb";
 const ANIMATIONS_URL = "/models/animations.glb";
 /** ポインターロック中の照準クリックで会話開始できる最大距離(m) */
 const ACTIVATE_DISTANCE = 30;
+
+/** VRMも読めるようにGLTFLoaderへVRMプラグインを登録する(GLBには影響しない) */
+const extendLoaderWithVrm = (loader: unknown) => {
+  (loader as GLTFLoader).register((parser) => new VRMLoaderPlugin(parser));
+};
 
 /**
  * 未会話のNPCを囲む光のバリア。脈動して目立たせ、クリックを促す
@@ -80,6 +88,11 @@ export type NpcWalkCommand = {
 
 type NpcAvatarProps = {
   position: [number, number, number];
+  /**
+   * アバターのURL(.glb / .vrm どちらでも可。省略時はデフォルトの姿)。
+   * 管理画面のavatarConfig(コンシェルジュ)やavatarUrl(店舗NPC)を渡す
+   */
+  avatarUrl?: string;
   headLabel?: string;
   headLabelColor?: string;
   /** 発話中はTalkingアニメーションに切り替える */
@@ -102,6 +115,7 @@ type NpcAvatarProps = {
 
 const NpcAvatarInner = ({
   position,
+  avatarUrl,
   headLabel,
   headLabelColor,
   speaking,
@@ -122,11 +136,29 @@ const NpcAvatarInner = ({
   // 最後に足跡を落とした位置(0.7mごとに追加する)
   const lastCrumb = useRef<THREE.Vector3 | null>(null);
   const camera = useThree((state) => state.camera);
-  const { scene } = useGLTF(AVATAR_URL);
-  // 既存アバターアプリと同じGLBを使うため、シーンを複製して干渉を避ける
-  const avatar = useMemo(() => SkeletonUtils.clone(scene), [scene]);
-  const { animations } = useGLTF(ANIMATIONS_URL);
-  const { animations: walkAnimationsRaw } = useGLTF(WALK_URL);
+  // VRM/GLBのどちらでも読み込める(VRMプラグインはGLBには影響しない)
+  const gltf = useGLTF(
+    avatarUrl || AVATAR_URL,
+    undefined,
+    undefined,
+    extendLoaderWithVrm
+  );
+  const vrm: VRM | null = (gltf.userData as { vrm?: VRM }).vrm ?? null;
+  const avatar = useMemo(() => {
+    if (vrm) {
+      // VRM0は-Z向きなので+Z向き(GLBと同じ)に揃える。springbone等が
+      // ノード参照を持つためVRMは複製せずそのまま使う
+      if (!vrm.scene.userData.__prepared) {
+        VRMUtils.rotateVRM0(vrm);
+        vrm.scene.userData.__prepared = true;
+      }
+      return vrm.scene;
+    }
+    // GLBは同じモデルを複数体出せるよう複製する
+    return SkeletonUtils.clone(gltf.scene);
+  }, [gltf, vrm]);
+  const { animations, scene: animRig } = useGLTF(ANIMATIONS_URL);
+  const { animations: walkAnimationsRaw, scene: walkRig } = useGLTF(WALK_URL);
   // 歩行クリップにはルートモーション(腰が前へ4.4m進んでループ先頭に戻る)が
   // 含まれており、コード側の移動と二重になってガクッと戻る原因になるため、
   // 腰の水平移動成分を除去する(上下の弾みは残す)
@@ -146,10 +178,16 @@ const NpcAvatarInner = ({
       }),
     [walkAnimationsRaw]
   );
-  const allAnimations = useMemo(
-    () => [...animations, ...walkAnimations],
-    [animations, walkAnimations]
-  );
+  const allAnimations = useMemo(() => {
+    if (vrm) {
+      // モーション資産(RPMリグ)をVRMヒューマノイドへリターゲットして共有する
+      return [
+        ...animations.map((c) => retargetClipToVrm(c, animRig, vrm)),
+        ...walkAnimations.map((c) => retargetClipToVrm(c, walkRig, vrm)),
+      ];
+    }
+    return [...animations, ...walkAnimations];
+  }, [vrm, animations, walkAnimations, animRig, walkRig]);
   const { actions } = useAnimations(allAnimations, group);
   const [isWalking, setIsWalking] = useState(false);
 
@@ -273,6 +311,8 @@ const NpcAvatarInner = ({
     group.current.rotation.y = current + diff * Math.min(1, delta * 5);
 
     positionRef?.current.copy(group.current.position);
+    // VRMは正規化ボーン→実ボーンへの反映やスプリングボーンの更新が必要
+    vrm?.update(delta);
   });
 
   return (
@@ -315,7 +355,11 @@ const NpcAvatarInner = ({
 };
 
 class NpcErrorBoundary extends Component<
-  { children: ReactNode; onError?: (message: string) => void },
+  {
+    children: ReactNode;
+    fallback?: ReactNode;
+    onError?: (message: string) => void;
+  },
   { failed: boolean }
 > {
   state = { failed: false };
@@ -326,15 +370,35 @@ class NpcErrorBoundary extends Component<
     this.props.onError?.(error.message);
   }
   render() {
-    return this.state.failed ? null : this.props.children;
+    if (!this.state.failed) return this.props.children;
+    return this.props.fallback ?? null;
   }
 }
 
-/** NPC内部のエラーでシーン全体が止まらないようにバウンダリで包む */
+/**
+ * NPC内部のエラーでシーン全体が止まらないようにバウンダリで包む。
+ * カスタムアバターの読み込みに失敗した場合はデフォルトの姿で出し直す
+ */
 export const NpcAvatar = (
   props: NpcAvatarProps & { onError?: (message: string) => void }
 ) => (
-  <NpcErrorBoundary onError={props.onError}>
+  <NpcErrorBoundary
+    key={props.avatarUrl ?? "default"}
+    onError={(message) => {
+      props.onError?.(
+        props.avatarUrl
+          ? `アバターを読み込めないため標準の姿で表示します(${message})`
+          : message
+      );
+    }}
+    fallback={
+      props.avatarUrl ? (
+        <NpcErrorBoundary>
+          <NpcAvatarInner {...props} avatarUrl={undefined} />
+        </NpcErrorBoundary>
+      ) : null
+    }
+  >
     <NpcAvatarInner {...props} />
   </NpcErrorBoundary>
 );

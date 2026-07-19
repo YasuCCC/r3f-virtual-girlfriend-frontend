@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+  <head><meta charset="UTF-8" /><title>spark test</title></head>
+  <body style="margin:0">
+    <script type="module">
+      import * as THREE from "three";
+      import { SplatMesh } from "@sparkjsdev/spark";
+
+      const renderer = new THREE.WebGLRenderer();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x203040);
+      const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 100);
+      camera.position.set(0, 1.6, 3.5);
+
+      const useFile = new URLSearchParams(location.search).get("file") || "sample_room.sog";
+      const splat = new SplatMesh({ url: "/splats/" + useFile });
+      splat.rotation.x = Math.PI;
+      scene.add(splat);
+      splat.initialized.then(() => {
+        console.log("SPLAT INITIALIZED, count=", splat.numSplats);
+        window.__splatReady = true;
+      }).catch((e) => console.error("SPLAT INIT FAILED", e));
+
+      renderer.setAnimationLoop(() => renderer.render(scene, camera));
+    </script>
+  </body>
+</html>

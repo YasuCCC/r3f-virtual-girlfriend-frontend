@@ -124,8 +124,12 @@ export function retargetClipToVrm(
       );
     } else if (
       track instanceof THREE.VectorKeyframeTrack &&
-      property === "position"
+      property === "position" &&
+      boneName === "Hips"
     ) {
+      // 位置トラックは腰(ルートモーション)のみ転送する。他のボーンの位置を
+      // 適用するとRPMリグの骨格比率がVRM側を上書きし、首が縮むなど
+      // プロポーションが崩れてしまう(回転のみが正しいリターゲット)
       const values = Float32Array.from(track.values);
       for (let i = 0; i < values.length; i += 3) {
         const flip = vrm.meta.metaVersion === "0" ? -1 : 1;

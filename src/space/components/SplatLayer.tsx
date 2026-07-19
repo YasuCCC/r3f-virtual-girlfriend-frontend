@@ -8,7 +8,16 @@ import { useEffect, useMemo, useState } from "react";
  */
 export const SparkRendererMount = () => {
   const gl = useThree((state) => state.gl);
-  const spark = useMemo(() => new SparkRenderer({ renderer: gl }), [gl]);
+  const spark = useMemo(
+    () =>
+      new SparkRenderer({
+        renderer: gl,
+        // 2.0でPlayCanvas(Arrival Space)のスプラット描画とほぼ同じ見え方になる
+        // (Spark公式ドキュメント記載)。スプラットがシャープになる
+        focalAdjustment: 2.0,
+      }),
+    [gl]
+  );
   return <primitive object={spark} />;
 };
 

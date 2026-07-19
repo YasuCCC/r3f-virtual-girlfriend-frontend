@@ -38,6 +38,22 @@ export const SPACES: SpaceDefinition[] = [
     spawn: [0, 1.6, 3],
   },
   {
+    // https://live.arrival.space/k_hall_entrance1 (55732136_9974) — LODなしのSOG直配信
+    id: "k_hall_entrance1",
+    title: "k_hall_entrance1",
+    splatUrl:
+      "/arrival-ugc/55732136/a174688799e9be26cefd446d75a3d482c8012b4572cd94a42b5ab88a8b932eb3_i_k_h2f.sog",
+    collisionUrl:
+      "/arrival-ugc/55732136/44182eef88df8c9b5b2dced3bf99c87615ee68e58f3484dea72cf0cc7dd23f39_a174688799e9be26cefd446d75a3d482c8012b4572cd94a42b5ab88a8b932eb3_i_k_h2f_collision.glb",
+    // centerPosition (7.46, 2.068, 5.069) + assetYOffset 0.2
+    position: [7.46, 2.268, 5.069],
+    // centerRotation (x=-180は上下反転として適用済み, y=89.02)
+    rotationYDeg: 89.02,
+    scale: 4,
+    spawn: [0, 1.6, 0],
+    light: { type: "directional", rotationDeg: 275, intensity: 1.3 },
+  },
+  {
     // https://live.arrival.space/east_street01 (Yokohama East Avenue01 / 55732136_2242)
     id: "east_street01",
     title: "Yokohama East Avenue01",

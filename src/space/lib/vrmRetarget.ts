@@ -68,6 +68,45 @@ const RPM_TO_VRM: Record<string, VRMHumanBoneName> = {
 const normalizeBoneName = (name: string) => name.replace(/^mixamorig:?/, "");
 
 /**
+ * クリップを別のGLBリグ(同じボーン名構成)向けに調整した新しいクリップを返す。
+ * 回転はそのまま使い、位置トラックは腰(ルートモーション)のみを身長比で
+ * スケールして転送する。女性用リグのモーションに含まれる位置トラックが
+ * 男性型アバターの骨格比率を上書きして首が縮む問題を防ぐ
+ */
+export function adaptClipToRig(
+  clip: THREE.AnimationClip,
+  sourceRoot: THREE.Object3D,
+  targetRoot: THREE.Object3D
+): THREE.AnimationClip {
+  const vec = new THREE.Vector3();
+  const sourceHips = sourceRoot.getObjectByName("Hips");
+  const targetHips = targetRoot.getObjectByName("Hips");
+  sourceHips?.updateWorldMatrix(true, false);
+  targetHips?.updateWorldMatrix(true, false);
+  const sourceY = sourceHips?.getWorldPosition(vec).y ?? 1;
+  const targetY = targetHips?.getWorldPosition(vec).y ?? sourceY;
+  const hipsScale = sourceY > 0 ? targetY / sourceY : 1;
+
+  const tracks: THREE.KeyframeTrack[] = [];
+  for (const track of clip.tracks) {
+    const [rawName, property] = track.name.split(".");
+    if (property === "position") {
+      if (normalizeBoneName(rawName) !== "Hips") continue;
+      tracks.push(
+        new THREE.VectorKeyframeTrack(
+          track.name,
+          Array.from(track.times),
+          Array.from(track.values, (v) => v * hipsScale)
+        )
+      );
+    } else {
+      tracks.push(track);
+    }
+  }
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+}
+
+/**
  * クリップをVRM用に変換した新しいクリップを返す。
  * sourceRootはクリップの元リグ(レストポーズのままのシーン)であること。
  */

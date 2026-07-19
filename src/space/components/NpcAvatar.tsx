@@ -12,7 +12,7 @@ import {
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
-import { retargetClipToVrm } from "../lib/vrmRetarget";
+import { adaptClipToRig, retargetClipToVrm } from "../lib/vrmRetarget";
 
 // Ready Player Me公式アニメーションライブラリの歩行モーション
 // (https://github.com/readyplayerme/animation-library)
@@ -186,8 +186,12 @@ const NpcAvatarInner = ({
         ...walkAnimations.map((c) => retargetClipToVrm(c, walkRig, vrm)),
       ];
     }
-    return [...animations, ...walkAnimations];
-  }, [vrm, animations, walkAnimations, animRig, walkRig]);
+    // GLBも骨格比率が違うモデル(男性型など)があるため回転のみ転送する
+    return [
+      ...animations.map((c) => adaptClipToRig(c, animRig, avatar)),
+      ...walkAnimations.map((c) => adaptClipToRig(c, walkRig, avatar)),
+    ];
+  }, [vrm, animations, walkAnimations, animRig, walkRig, avatar]);
   const { actions } = useAnimations(allAnimations, group);
   const [isWalking, setIsWalking] = useState(false);
 

@@ -93,7 +93,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-7";
+const BUILD_TAG = "b0719-8";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -154,6 +154,8 @@ export const SpaceApp = () => {
   const [activeShop, setActiveShop] = useState<ShopNpc | null>(null);
   const [shopBubble, setShopBubble] = useState<string | null>(null);
   const activeShopRef = useRef<ShopNpc | null>(null);
+  // 次の誘導が始まっても店主はすぐ消さず、十分離れてから見送りとして残す
+  const [lingeringShop, setLingeringShop] = useState<ShopNpc | null>(null);
   // 誘導中のユーザー自動追従(WASD操作で解除)
   const followRef = useRef({ active: false, speed: 3 });
   const npcPosRef = useRef(new THREE.Vector3());
@@ -230,6 +232,7 @@ export const SpaceApp = () => {
     setNpcConfig(null);
     setNpcBubble(null);
     setActiveShop(null);
+    setLingeringShop(null);
     setShopBubble(null);
     setNpcThinking(false);
     setNpcSpeaking(false);
@@ -308,7 +311,9 @@ export const SpaceApp = () => {
     }
     const path = buildGuidePath(gp);
     if (path.length === 0) return;
-    // 新しい誘導を始めたら店舗応対は解除
+    // 新しい誘導を始めたら店舗応対は解除。ただし店主の姿は余韻として残し、
+    // 十分離れてから消す(現実で店主がすぐ消えたら不自然なので)
+    if (activeShopRef.current) setLingeringShop(activeShopRef.current);
     activeShopRef.current = null;
     setActiveShop(null);
     setShopBubble(null);
@@ -392,37 +397,18 @@ export const SpaceApp = () => {
       const len = Math.hypot(dirX, dirZ) || 1;
       dirX /= len;
       dirZ /= len;
-      // どき先は壁判定して選ぶ(店の壁の中に隠れてしまわないように)。
-      // 右→左の順に試し、両方塞がっていれば来た道(直前に歩いた安全な方向)へ下がる
-      const sideClear = (ox: number, oz: number) => {
-        const collision = collisionRef.current;
-        if (!collision) return true;
-        const raycaster = new THREE.Raycaster(
-          new THREE.Vector3(sx, sy + 1.0, sz),
-          new THREE.Vector3(ox, 0, oz).normalize(),
-          0,
-          2.6
-        );
-        return raycaster.intersectObject(collision, true).length === 0;
-      };
-      let offX = dirZ * 2;
-      let offZ = -dirX * 2;
-      if (!sideClear(dirZ, -dirX)) {
-        if (sideClear(-dirZ, dirX)) {
-          offX = -dirZ * 2;
-          offZ = dirX * 2;
-        } else {
-          offX = -dirX * 2 + dirZ * 0.8;
-          offZ = -dirZ * 2 - dirX * 0.8;
-        }
-      }
+      // どき先は「来た道を戻ってユーザーの後ろ斜め」にする。店の脇は壁の中の
+      // 場合があるが、来た道はいま歩いてきた場所なので必ず開けている
+      // (ユーザーは店から約3m手前で止まるため、その1.5mほど後ろに立つ)
       setNpcWalk({
         id: ++walkSeq.current,
-        path: [[sx + offX, sy, sz + offZ]],
+        path: [[sx - dirX * 4.5 + dirZ * 1.5, sy, sz - dirZ * 4.5 - dirX * 1.5]],
         speed: 1.2,
       });
       // ユーザーの視線を店主のほうへ向ける
       focusRef.current = { x: sx, y: sy + 1.4, z: sz };
+      // 同じ店に戻ってきた場合は見送り姿と重複させない
+      setLingeringShop((prev) => (prev?.name === shop.name ? null : prev));
       const greet = shop.greeting || `いらっしゃいませ。${shop.name}です。`;
       setShopBubble(greet);
       void playNpcAudio(greet, "shop");
@@ -556,6 +542,22 @@ export const SpaceApp = () => {
     }
   };
 
+  // 見送り中の店主は、案内人(とそれに追従するユーザー)が8m以上離れたら消す
+  useEffect(() => {
+    if (!lingeringShop) return;
+    const shopPos = new THREE.Vector3(
+      lingeringShop.x ?? 0,
+      lingeringShop.y ?? 0,
+      lingeringShop.z ?? 0
+    );
+    const timer = setInterval(() => {
+      if (npcPosRef.current.distanceTo(shopPos) > 8) {
+        setLingeringShop(null);
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, [lingeringShop]);
+
   const npcAvailable = Boolean(activeSpace?.npc);
   const guideTargets = useMemo(() => buildGuideTargets(npcConfig), [npcConfig]);
   const tourRoutes = useMemo(
@@ -622,6 +624,20 @@ export const SpaceApp = () => {
             thinking={npcThinking && Boolean(activeShop)}
             onActivate={handleShopActivate}
             onError={(message) => pushToast(`店舗NPC表示エラー: ${message}`)}
+          />
+        )}
+        {/* 次の店へ移動中も、離れるまでは前の店主が見送りとして残る */}
+        {lingeringShop && lingeringShop.name !== activeShop?.name && (
+          <NpcAvatar
+            position={[
+              lingeringShop.x ?? 0,
+              lingeringShop.y ?? 0,
+              lingeringShop.z ?? 0,
+            ]}
+            headLabel={lingeringShop.name}
+            headLabelColor="#d97706"
+            speaking={false}
+            onError={() => setLingeringShop(null)}
           />
         )}
         <Player

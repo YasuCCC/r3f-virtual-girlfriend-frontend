@@ -93,7 +93,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-9";
+const BUILD_TAG = "b0719-10";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -399,9 +399,10 @@ export const SpaceApp = () => {
       dirZ /= len;
       // どき先は「店主の後ろ・少し横」。ユーザーからは店主の肩越しに
       // 案内人の姿が見え、店主との会話の主役を譲る立ち位置になる
+      // (ずらし幅は控えめにして、店の壁に入り込まないようにする)
       setNpcWalk({
         id: ++walkSeq.current,
-        path: [[sx + dirX * 1.5 + dirZ * 1.2, sy, sz + dirZ * 1.5 - dirX * 1.2]],
+        path: [[sx + dirX * 1.0 + dirZ * 1.0, sy, sz + dirZ * 1.0 - dirX * 1.0]],
         speed: 1.2,
       });
       // ユーザーの視線を店主のほうへ向ける

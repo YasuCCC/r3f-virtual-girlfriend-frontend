@@ -279,27 +279,33 @@ const NpcAvatarInner = ({
     <group ref={group} position={position}>
       <primitive object={avatar} />
       {highlight && <ConciergeBeacon />}
-      {(headLabel || bubbleText || thinking) && (
+      {headLabel && (
         <Html
           position={[0, 2.05, 0]}
           center
           distanceFactor={6}
           style={{ pointerEvents: "none" }}
         >
-          <div className="flex w-64 flex-col items-center gap-1">
-            {(bubbleText || thinking) && (
-              <div className="max-h-40 w-full overflow-hidden rounded-xl bg-white/95 px-3 py-2 text-xs leading-relaxed text-gray-900 shadow-lg">
-                {thinking ? "考え中…" : bubbleText}
-              </div>
-            )}
-            {headLabel && (
-              <div
-                className="rounded-full px-3 py-0.5 text-xs font-semibold text-white shadow"
-                style={{ backgroundColor: headLabelColor || "#4f46e5" }}
-              >
-                {headLabel}
-              </div>
-            )}
+          <div
+            className="whitespace-nowrap rounded-full px-3 py-0.5 text-xs font-semibold text-white shadow"
+            style={{ backgroundColor: headLabelColor || "#4f46e5" }}
+          >
+            {headLabel}
+          </div>
+        </Html>
+      )}
+      {/* 会話の吹き出し: 顔を隠さないよう口の横に出す。半透明で背後も見える */}
+      {(bubbleText || thinking) && (
+        <Html
+          position={[0.35, 1.85, 0]}
+          distanceFactor={6}
+          style={{ pointerEvents: "none" }}
+        >
+          <div className="relative ml-3 w-60">
+            <div className="absolute -left-1.5 top-4 h-3 w-3 rotate-45 rounded-sm bg-white/80" />
+            <div className="max-h-44 overflow-hidden rounded-2xl bg-white/80 px-3 py-2 text-xs leading-relaxed text-gray-900 shadow-lg backdrop-blur-sm">
+              {thinking ? "考え中…" : bubbleText}
+            </div>
           </div>
         </Html>
       )}

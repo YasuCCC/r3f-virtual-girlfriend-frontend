@@ -1,8 +1,20 @@
 import { Html, useAnimations, useGLTF } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
-import { Component, ReactNode, useEffect, useMemo, useRef } from "react";
+import {
+  Component,
+  ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import * as THREE from "three";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
+import {
+  buildWalkClip,
+  WALK_CLIP_BASE_SPEED,
+  WALK_CLIP_NAME,
+} from "../lib/walkClip";
 
 const AVATAR_URL = "/models/64f1a714fe61576b46f27ca2.glb";
 const ANIMATIONS_URL = "/models/animations.glb";
@@ -54,20 +66,32 @@ const NpcAvatarInner = ({
   // 既存アバターアプリと同じGLBを使うため、シーンを複製して干渉を避ける
   const avatar = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { animations } = useGLTF(ANIMATIONS_URL);
-  const { actions } = useAnimations(animations, group);
+  // 歩行モーションは資産にないため、ボーン基準ポーズから合成する
+  const allAnimations = useMemo(
+    () => [...animations, buildWalkClip(avatar)],
+    [animations, avatar]
+  );
+  const { actions } = useAnimations(allAnimations, group);
+  const [isWalking, setIsWalking] = useState(false);
 
   const animationName = useMemo(() => {
+    if (isWalking) return WALK_CLIP_NAME;
     const wanted = speaking ? "Talking_1" : "Idle";
     if (animations.some((a) => a.name === wanted)) return wanted;
     return animations[0]?.name;
-  }, [speaking, animations]);
+  }, [isWalking, speaking, animations]);
 
   useEffect(() => {
     if (!animationName) return;
     const action = actions[animationName];
-    action?.reset().fadeIn(0.4).play();
+    if (!action) return;
+    if (animationName === WALK_CLIP_NAME) {
+      // 歩行速度に合わせて足の回転速度を同期させる
+      action.timeScale = walkSpeed.current / WALK_CLIP_BASE_SPEED;
+    }
+    action.reset().fadeIn(0.3).play();
     return () => {
-      action?.fadeOut(0.4);
+      action.fadeOut(0.3);
     };
   }, [animationName, actions]);
 
@@ -112,6 +136,7 @@ const NpcAvatarInner = ({
     walkId.current = walk.id;
     walkQueue.current = walk.path.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
     walkSpeed.current = walk.speed;
+    setIsWalking(true);
   }, [walk]);
 
   // 歩行中は進行方向へ移動、待機中はプレイヤー(カメラ)の方をゆっくり向く
@@ -130,6 +155,7 @@ const NpcAvatarInner = ({
         pos.copy(next);
         walkQueue.current.shift();
         if (walkQueue.current.length === 0 && walkId.current !== null) {
+          setIsWalking(false);
           onWalkDone?.(walkId.current);
         }
       } else {

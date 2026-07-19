@@ -16,12 +16,12 @@ const GROUND_RAY_UP = 0.5;
  */
 const GROUND_RAY_FAR = 30;
 /**
- * これより低い接地ヒットは地面とみなさない。屋外スキャンの衝突メッシュは
- * 濡れた路面の反射により「地下に鏡像の街」を含んでおり、路面メッシュの
- * 穴を接地レイが素通りすると鏡像を地面と誤認してカメラが地下へ沈む
- * (行き先クリック後に視点が破綻していた根本原因)
+ * 1フレームの接地補正で許容する床の急落幅。スキャン由来の衝突メッシュは
+ * 床メッシュの穴や「反射で床下にできる鏡像ジオメトリ」を含むため、
+ * これを超えて急に低い面が検出された場合は穴/鏡像とみなして無視する
+ * (床の高さは連続的にしか変化しない、という前提のモデル)
  */
-const GROUND_MIN_Y = -2;
+const GROUND_MAX_DROP = 1.2;
 /** 追従時にNPCと保つ距離(m) */
 const FOLLOW_DISTANCE = 3;
 /** ドラッグ視点の感度(rad/px) */
@@ -88,6 +88,8 @@ export const Player = ({
   const rayOrigin = useRef(new THREE.Vector3());
   const down = useRef(new THREE.Vector3(0, -1, 0));
   const chase = useRef(new THREE.Vector3());
+  // 最後に確認できた「本物の床」の高さ。急落ヒットの棄却と復帰の基準にする
+  const floorY = useRef(0);
 
   useEffect(() => {
     camera.rotation.order = "YXZ";
@@ -95,6 +97,7 @@ export const Player = ({
     yaw.current = (spawnYawDeg * Math.PI) / 180;
     pitch.current = 0;
     camera.rotation.set(0, yaw.current, 0);
+    floorY.current = spawn[1] - EYE_HEIGHT;
   }, [camera, spawn, spawnYawDeg]);
 
   // キー入力(入力欄にフォーカスがある間は拾わない)
@@ -168,17 +171,22 @@ export const Player = ({
       raycaster.current.set(rayOrigin.current, down.current);
       raycaster.current.far = GROUND_RAY_FAR;
       const hits = raycaster.current.intersectObject(collision, true);
-      // 地下の鏡像ノイズ(GROUND_MIN_Y未満)を除いた最も近い面を地面とする
-      const hit = hits.find((h) => h.point.y >= GROUND_MIN_Y);
+      // 既知の床から急落していない面だけを地面と認める。床メッシュの穴や
+      // 床下の鏡像ジオメトリ(反射由来)を「地面」と誤認して沈まないため
+      const hit = hits.find(
+        (h) => h.point.y >= floorY.current - GROUND_MAX_DROP
+      );
       if (hit) {
+        floorY.current = hit.point.y;
         const dy = hit.point.y + EYE_HEIGHT - camera.position.y;
         const step = dy * Math.min(1, delta * 10);
         // 上昇は最大3m/sに制限(階段は登れるが、一瞬で高所に飛ばない)
         camera.position.y += dy > 0 ? Math.min(step, 3 * delta) : step;
-      } else if (camera.position.y < EYE_HEIGHT - 0.5) {
-        // 有効な地面が見つからず地下に沈んでいる場合は路面レベルへ復帰する
+      } else if (camera.position.y < floorY.current + EYE_HEIGHT - 0.5) {
+        // 有効な床がなく、既知の床より沈んでいる場合は床の高さへ復帰する
         camera.position.y += Math.min(
-          (EYE_HEIGHT - camera.position.y) * Math.min(1, delta * 10),
+          (floorY.current + EYE_HEIGHT - camera.position.y) *
+            Math.min(1, delta * 10),
           3 * delta
         );
       }
@@ -277,15 +285,17 @@ export const Player = ({
           pitch.current += (targetPitch - pitch.current) * s;
         }
         camera.rotation.set(pitch.current, yaw.current, 0);
-        applyGrounding(collision, delta);
-        // NPCは登録済みの経路(地面)上を歩くため、追従中のカメラ高さは
-        // NPC基準に強制する。衝突メッシュのノイズで接地判定が狂っても
-        // 上空・地下視点には絶対にならない(最終保険)
-        camera.position.y = THREE.MathUtils.clamp(
-          camera.position.y,
-          target.y + EYE_HEIGHT - 2,
-          target.y + EYE_HEIGHT + 2
-        );
+        // 追従中はレイキャストを使わず、NPCの高さ+目線にカメラを合わせる。
+        // NPCは床の上に登録された経路を歩くので、これが最も信頼できる
+        // 床情報であり、衝突メッシュの穴や床下の鏡像に一切影響されない
+        const targetEye = target.y + EYE_HEIGHT;
+        camera.position.y +=
+          (targetEye - camera.position.y) * Math.min(1, delta * 10);
+        floorY.current = target.y;
+        if (import.meta.env.DEV) {
+          (window as unknown as Record<string, unknown>).__playerPos =
+            camera.position.toArray();
+        }
         return;
       }
     }

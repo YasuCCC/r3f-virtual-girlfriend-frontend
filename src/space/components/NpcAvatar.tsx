@@ -225,6 +225,23 @@ const NpcAvatarInner = ({
   const blinkUntil = useRef(0);
   const mouthLevel = useRef(0);
 
+  // 診断: このアバターが持つ表情モーフの一覧(開発モードのみ)。
+  // リップシンク・まばたきが動かない場合、モーフ自体が無いのか
+  // 名前が違うのかをF12コンソールで確認できる
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const names = new Set<string>();
+    morphMeshes.forEach((mesh) =>
+      Object.keys(mesh.morphTargetDictionary ?? {}).forEach((k) =>
+        names.add(k)
+      )
+    );
+    console.info(
+      `[avatar] ${avatarUrl ?? "(default)"} morphs=${names.size}:`,
+      [...names].slice(0, 60).join(", ") || "(モーフなし)"
+    );
+  }, [morphMeshes, avatarUrl]);
+
   /** 候補名のうち存在する最初のモーフをlerpで動かす */
   const lerpMorph = (names: string[], value: number, speed: number) => {
     for (const mesh of morphMeshes) {

@@ -47,6 +47,8 @@ type NpcAvatarProps = {
   onWalkDone?: (id: number) => void;
   /** 現在位置を毎フレーム共有するref(プレイヤーの自動追従に使う) */
   positionRef?: React.MutableRefObject<THREE.Vector3>;
+  /** 歩行中に足跡を積むref(プレイヤーはこの足跡をなぞって追従する) */
+  trailRef?: React.MutableRefObject<THREE.Vector3[]>;
 };
 
 const NpcAvatarInner = ({
@@ -60,12 +62,15 @@ const NpcAvatarInner = ({
   walk,
   onWalkDone,
   positionRef,
+  trailRef,
 }: NpcAvatarProps) => {
   const group = useRef<THREE.Group>(null);
   // 誘導歩行の進行状態(経路の残りウェイポイント)
   const walkQueue = useRef<THREE.Vector3[]>([]);
   const walkId = useRef<number | null>(null);
   const walkSpeed = useRef(3);
+  // 最後に足跡を落とした位置(0.7mごとに追加する)
+  const lastCrumb = useRef<THREE.Vector3 | null>(null);
   const camera = useThree((state) => state.camera);
   const { scene } = useGLTF(AVATAR_URL);
   // 既存アバターアプリと同じGLBを使うため、シーンを複製して干渉を避ける
@@ -144,6 +149,7 @@ const NpcAvatarInner = ({
     walkId.current = walk.id;
     walkQueue.current = walk.path.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
     walkSpeed.current = walk.speed;
+    lastCrumb.current = null;
     setIsWalking(true);
   }, [walk]);
 
@@ -169,6 +175,16 @@ const NpcAvatarInner = ({
       } else {
         dir.normalize().multiplyScalar(step);
         pos.add(dir);
+      }
+      // 通過点を足跡として残す(プレイヤーはこの足跡をなぞって安全に追従する)
+      if (trailRef) {
+        if (!lastCrumb.current) {
+          lastCrumb.current = pos.clone();
+          trailRef.current.push(pos.clone());
+        } else if (pos.distanceTo(lastCrumb.current) >= 0.7) {
+          lastCrumb.current.copy(pos);
+          trailRef.current.push(pos.clone());
+        }
       }
       targetYaw = Math.atan2(dir.x, dir.z);
     } else {

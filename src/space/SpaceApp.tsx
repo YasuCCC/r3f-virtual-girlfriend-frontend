@@ -126,6 +126,8 @@ export const SpaceApp = () => {
   // 誘導中のユーザー自動追従(WASD操作で解除)
   const followRef = useRef({ active: false, speed: 3 });
   const npcPosRef = useRef(new THREE.Vector3());
+  // NPCの足跡。プレイヤーはこれをなぞって追従する(建物を突き抜けない)
+  const npcTrailRef = useRef<THREE.Vector3[]>([]);
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
@@ -174,6 +176,7 @@ export const SpaceApp = () => {
     activeGuide.current = null;
     activeShopRef.current = null;
     followRef.current.active = false;
+    npcTrailRef.current.length = 0;
     recognitionRef.current?.stop();
     setNpcWalk(null);
     setNpcPhase("hidden");
@@ -267,6 +270,7 @@ export const SpaceApp = () => {
       void playNpcAudio(gp.guideMessage, "concierge");
     }
     const speed = npcConfigRef.current?.walkSpeed ?? 3;
+    npcTrailRef.current.length = 0;
     setNpcWalk({ id: ++walkSeq.current, path, speed });
     // ユーザー視点もNPCについて行く(WASDを押すと解除)
     followRef.current = { active: true, speed };
@@ -444,6 +448,7 @@ export const SpaceApp = () => {
             walk={npcWalk}
             onWalkDone={onNpcWalkDone}
             positionRef={npcPosRef}
+            trailRef={npcTrailRef}
           />
         )}
         {activeShop && (
@@ -469,6 +474,7 @@ export const SpaceApp = () => {
           spawnYawDeg={activeSpace?.spawnYawDeg ?? 0}
           followRef={followRef}
           followTargetRef={npcPosRef}
+          followPathRef={npcTrailRef}
         />
       </Canvas>
 

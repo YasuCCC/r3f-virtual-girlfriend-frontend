@@ -31,6 +31,12 @@ type PlayerProps = {
   followRef?: MutableRefObject<{ active: boolean; speed: number }>;
   /** 追従対象(NPC)の現在位置 */
   followTargetRef?: MutableRefObject<THREE.Vector3>;
+  /**
+   * NPCが実際に歩いた足跡(ブレッドクラム)。追従時はNPCへ直線で向かわず
+   * この足跡をなぞることで、建物や壁を突き抜けたり、ノイズの多い
+   * 衝突メッシュをよじ登って上空視点になるのを防ぐ
+   */
+  followPathRef?: MutableRefObject<THREE.Vector3[]>;
 };
 
 /**
@@ -46,6 +52,7 @@ export const Player = ({
   spawnYawDeg = 0,
   followRef,
   followTargetRef,
+  followPathRef,
 }: PlayerProps) => {
   const keys = useRef<Record<string, boolean>>({});
   const camera = useThree((state) => state.camera);
@@ -129,7 +136,9 @@ export const Player = ({
     };
   }, [gl]);
 
-  // 接地: 頭上少し上から真下にレイを飛ばして地面の高さに追従する
+  // 接地: 膝の高さ(足元+0.5m)から真下にレイを飛ばして地面の高さに追従する。
+  // 膝より上の面(屋根・看板・ひさし等)は構造的に拾えないため、ノイズの多い
+  // 衝突メッシュを段差としてよじ登り上空視点になることがない
   const applyGrounding = (
     collision: THREE.Object3D | null,
     delta: number
@@ -137,18 +146,15 @@ export const Player = ({
     if (collision) {
       rayOrigin.current
         .copy(camera.position)
-        .setY(camera.position.y + GROUND_RAY_UP);
+        .setY(camera.position.y - EYE_HEIGHT + GROUND_RAY_UP);
       raycaster.current.set(rayOrigin.current, down.current);
       raycaster.current.far = GROUND_RAY_FAR;
       const hits = raycaster.current.intersectObject(collision, true);
       if (hits.length > 0) {
-        const targetY = hits[0].point.y + EYE_HEIGHT;
-        // 1mを超える急な上昇は「屋根に乗った」誤検出とみなして無視する
-        // (追従中に建物を横切った際、上空視点になるのを防ぐ)
-        if (targetY - camera.position.y <= 1.0) {
-          camera.position.y +=
-            (targetY - camera.position.y) * Math.min(1, delta * 10);
-        }
+        const dy = hits[0].point.y + EYE_HEIGHT - camera.position.y;
+        const step = dy * Math.min(1, delta * 10);
+        // 上昇は最大3m/sに制限(階段は登れるが、一瞬で高所に飛ばない)
+        camera.position.y += dy > 0 ? Math.min(step, 3 * delta) : step;
       }
     } else {
       camera.position.y = EYE_HEIGHT;
@@ -193,13 +199,37 @@ export const Player = ({
         );
         const dist = chase.current.length();
         if (dist > FOLLOW_DISTANCE) {
+          // NPCの足跡(通過済みの安全な経路)をなぞって移動する。
+          // 直線で追うと建物の角を突き抜けてしまうため
+          const trail = followPathRef?.current;
+          if (trail) {
+            while (
+              trail.length > 0 &&
+              Math.hypot(
+                trail[0].x - camera.position.x,
+                trail[0].z - camera.position.z
+              ) < 0.5
+            ) {
+              trail.shift();
+            }
+          }
+          const dest = trail && trail.length > 0 ? trail[0] : target;
+          chase.current.set(
+            dest.x - camera.position.x,
+            0,
+            dest.z - camera.position.z
+          );
+          const destDist = chase.current.length();
           const step = Math.min(
             follow.speed * 1.25 * delta,
-            dist - FOLLOW_DISTANCE
+            dist - FOLLOW_DISTANCE,
+            destDist
           );
-          chase.current.normalize().multiplyScalar(step);
-          camera.position.x += chase.current.x;
-          camera.position.z += chase.current.z;
+          if (destDist > 1e-4 && step > 0) {
+            chase.current.normalize().multiplyScalar(step);
+            camera.position.x += chase.current.x;
+            camera.position.z += chase.current.z;
+          }
         }
         // ドラッグ操作中でなければ視線をNPCへ向ける(ヨー/ピッチのみ)
         if (!dragging.current && dist > 0.5) {

@@ -237,13 +237,14 @@ export const Player = ({
           // 直線で追うと建物の角を突き抜けてしまうため
           const trail = followPathRef?.current;
           if (trail) {
-            while (
-              trail.length > 0 &&
-              Math.hypot(
-                trail[0].x - camera.position.x,
-                trail[0].z - camera.position.z
-              ) < 0.5
-            ) {
+            const crumbDist = (c: THREE.Vector3) =>
+              Math.hypot(c.x - camera.position.x, c.z - camera.position.z);
+            while (trail.length > 0 && crumbDist(trail[0]) < 0.5) {
+              trail.shift();
+            }
+            // 回り道の足跡はスキップする(次の足跡の方が近ければ前へ進める)。
+            // 店舗到着時の「横どき」の跡などを律儀になぞらないため
+            while (trail.length > 1 && crumbDist(trail[1]) < crumbDist(trail[0])) {
               trail.shift();
             }
           }

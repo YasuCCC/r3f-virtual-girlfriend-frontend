@@ -93,7 +93,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-6";
+const BUILD_TAG = "b0719-7";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -390,9 +390,35 @@ export const SpaceApp = () => {
         dirZ = npcPosRef.current.z - from.z;
       }
       const len = Math.hypot(dirX, dirZ) || 1;
+      dirX /= len;
+      dirZ /= len;
+      // どき先は壁判定して選ぶ(店の壁の中に隠れてしまわないように)。
+      // 右→左の順に試し、両方塞がっていれば来た道(直前に歩いた安全な方向)へ下がる
+      const sideClear = (ox: number, oz: number) => {
+        const collision = collisionRef.current;
+        if (!collision) return true;
+        const raycaster = new THREE.Raycaster(
+          new THREE.Vector3(sx, sy + 1.0, sz),
+          new THREE.Vector3(ox, 0, oz).normalize(),
+          0,
+          2.6
+        );
+        return raycaster.intersectObject(collision, true).length === 0;
+      };
+      let offX = dirZ * 2;
+      let offZ = -dirX * 2;
+      if (!sideClear(dirZ, -dirX)) {
+        if (sideClear(-dirZ, dirX)) {
+          offX = -dirZ * 2;
+          offZ = dirX * 2;
+        } else {
+          offX = -dirX * 2 + dirZ * 0.8;
+          offZ = -dirZ * 2 - dirX * 0.8;
+        }
+      }
       setNpcWalk({
         id: ++walkSeq.current,
-        path: [[sx + (dirZ / len) * 2, sy, sz - (dirX / len) * 2]],
+        path: [[sx + offX, sy, sz + offZ]],
         speed: 1.2,
       });
       // ユーザーの視線を店主のほうへ向ける

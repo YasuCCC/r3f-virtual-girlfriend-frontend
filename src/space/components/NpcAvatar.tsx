@@ -9,6 +9,14 @@ const ANIMATIONS_URL = "/models/animations.glb";
 /** ポインターロック中の照準クリックで会話開始できる最大距離(m) */
 const ACTIVATE_DISTANCE = 30;
 
+export type NpcWalkCommand = {
+  /** 変わるたびに新しい歩行として実行される */
+  id: number;
+  path: [number, number, number][];
+  /** m/s */
+  speed: number;
+};
+
 type NpcAvatarProps = {
   position: [number, number, number];
   headLabel?: string;
@@ -20,6 +28,9 @@ type NpcAvatarProps = {
   thinking?: boolean;
   /** NPCがクリックされた(=会話を開始したい)ときに呼ばれる */
   onActivate?: () => void;
+  /** 誘導歩行の指示(guidePoints) */
+  walk?: NpcWalkCommand | null;
+  onWalkDone?: (id: number) => void;
 };
 
 const NpcAvatarInner = ({
@@ -30,8 +41,14 @@ const NpcAvatarInner = ({
   bubbleText,
   thinking,
   onActivate,
+  walk,
+  onWalkDone,
 }: NpcAvatarProps) => {
   const group = useRef<THREE.Group>(null);
+  // 誘導歩行の進行状態(経路の残りウェイポイント)
+  const walkQueue = useRef<THREE.Vector3[]>([]);
+  const walkId = useRef<number | null>(null);
+  const walkSpeed = useRef(3);
   const camera = useThree((state) => state.camera);
   const { scene } = useGLTF(AVATAR_URL);
   // 既存アバターアプリと同じGLBを使うため、シーンを複製して干渉を避ける
@@ -89,14 +106,45 @@ const NpcAvatarInner = ({
       window.removeEventListener("mousedown", onMouseDown, { capture: true });
   }, [camera, onActivate]);
 
-  // プレイヤー(カメラ)の方をゆっくり向く(水平のみ)
-  useFrame((_, delta) => {
+  // 誘導歩行コマンドを受け取ったら経路をセットする
+  useEffect(() => {
+    if (!walk || walk.id === walkId.current) return;
+    walkId.current = walk.id;
+    walkQueue.current = walk.path.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
+    walkSpeed.current = walk.speed;
+  }, [walk]);
+
+  // 歩行中は進行方向へ移動、待機中はプレイヤー(カメラ)の方をゆっくり向く
+  useFrame((_, rawDelta) => {
     if (!group.current) return;
-    const dx = camera.position.x - position[0];
-    const dz = camera.position.z - position[2];
-    const target = Math.atan2(dx, dz);
+    const delta = Math.min(rawDelta, 0.1);
+    let targetYaw: number;
+
+    if (walkQueue.current.length > 0) {
+      const pos = group.current.position;
+      const next = walkQueue.current[0];
+      const dir = next.clone().sub(pos);
+      const dist = dir.length();
+      const step = walkSpeed.current * delta;
+      if (dist <= step) {
+        pos.copy(next);
+        walkQueue.current.shift();
+        if (walkQueue.current.length === 0 && walkId.current !== null) {
+          onWalkDone?.(walkId.current);
+        }
+      } else {
+        dir.normalize().multiplyScalar(step);
+        pos.add(dir);
+      }
+      targetYaw = Math.atan2(dir.x, dir.z);
+    } else {
+      const dx = camera.position.x - group.current.position.x;
+      const dz = camera.position.z - group.current.position.z;
+      targetYaw = Math.atan2(dx, dz);
+    }
+
     const current = group.current.rotation.y;
-    let diff = target - current;
+    let diff = targetYaw - current;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
     group.current.rotation.y = current + diff * Math.min(1, delta * 5);

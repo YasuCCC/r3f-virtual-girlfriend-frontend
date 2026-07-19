@@ -4,12 +4,14 @@ import * as THREE from "three";
 import { CollisionMesh } from "./components/CollisionMesh";
 import { GalleryRoom } from "./components/GalleryRoom";
 import { LodSplatLayer } from "./components/LodSplatLayer";
-import { NpcAvatar } from "./components/NpcAvatar";
+import { NpcAvatar, NpcWalkCommand } from "./components/NpcAvatar";
 import { Player } from "./components/Player";
 import { SparkRendererMount, SplatLayer } from "./components/SplatLayer";
 import {
+  buildGuidePath,
   ChatTurn,
   fetchNpcConfig,
+  GuidePoint,
   NpcConfig,
   sendChat,
   synthesizeVoice,
@@ -110,6 +112,11 @@ export const SpaceApp = () => {
   const npcAudio = useRef<HTMLAudioElement | null>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const summonSeq = useRef(0);
+  const [npcWalk, setNpcWalk] = useState<NpcWalkCommand | null>(null);
+  const walkSeq = useRef(0);
+  const activeGuide = useRef<GuidePoint | null>(null);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
   // デバッグ用: ?nolock でポインターロックなしでもWASD移動できる
   const requireLock = useMemo(
@@ -151,6 +158,9 @@ export const SpaceApp = () => {
     npcHistory.current = [];
     npcConfigRef.current = null;
     npcStartedRef.current = false;
+    activeGuide.current = null;
+    recognitionRef.current?.stop();
+    setNpcWalk(null);
     setNpcPhase("hidden");
     setNpcStarted(false);
     setNpcConfig(null);
@@ -259,9 +269,97 @@ export const SpaceApp = () => {
     loadSpace({ id: "custom", title: "カスタムURL", splatUrl: url });
   };
 
+  /** 行き先案内: walkはNPCが誘導歩行、spaceUrlはスペース移動/リンク */
+  const startGuide = (gp: GuidePoint) => {
+    if (gp.type === "spaceUrl" && gp.spaceUrl) {
+      const slug = gp.spaceUrl.replace(/\/+$/, "").split("/").pop() ?? "";
+      const target = SPACES.find((s) => s.id === slug);
+      if (target) {
+        loadSpace(target);
+      } else {
+        window.open(gp.spaceUrl, "_blank", "noopener");
+      }
+      return;
+    }
+    const path = buildGuidePath(gp);
+    if (path.length === 0) return;
+    activeGuide.current = gp;
+    if (gp.guideMessage) {
+      setNpcBubble(gp.guideMessage);
+      void playNpcAudio(gp.guideMessage);
+    }
+    setNpcWalk({
+      id: ++walkSeq.current,
+      path,
+      speed: npcConfigRef.current?.walkSpeed ?? 3,
+    });
+  };
+
+  const onNpcWalkDone = () => {
+    const gp = activeGuide.current;
+    activeGuide.current = null;
+    if (gp?.arrivalMessage) {
+      setNpcBubble(gp.arrivalMessage);
+      void playNpcAudio(gp.arrivalMessage);
+    }
+  };
+
+  /** 音声入力(Web Speech API)。認識結果をそのまま質問として送信する */
+  const toggleVoiceInput = () => {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const w = window as unknown as Record<string, unknown>;
+    const Ctor = (w.SpeechRecognition ?? w.webkitSpeechRecognition) as
+      | (new () => {
+          lang: string;
+          interimResults: boolean;
+          onresult: (e: {
+            results: { [i: number]: { [j: number]: { transcript: string } } };
+          }) => void;
+          onend: () => void;
+          onerror: (e: { error?: string }) => void;
+          start: () => void;
+          stop: () => void;
+        })
+      | undefined;
+    if (!Ctor) {
+      pushToast(
+        "このブラウザは音声入力(Web Speech API)に対応していません。Chromeをお試しください"
+      );
+      return;
+    }
+    const rec = new Ctor();
+    const lang = npcConfigRef.current?.language;
+    rec.lang = !lang || lang === "auto" ? "ja-JP" : lang;
+    rec.interimResults = false;
+    rec.onresult = (e) => {
+      const transcript = e.results[0]?.[0]?.transcript?.trim();
+      if (transcript) {
+        setChatInput(transcript);
+        void submitNpcMessage(transcript);
+      }
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = (e) => {
+      setListening(false);
+      if (e.error && e.error !== "no-speech" && e.error !== "aborted") {
+        pushToast(`音声入力エラー: ${e.error}`);
+      }
+    };
+    recognitionRef.current = rec;
+    setListening(true);
+    rec.start();
+  };
+
   const sendNpcMessage = async (e: FormEvent) => {
     e.preventDefault();
-    const message = chatInput.trim();
+    await submitNpcMessage(chatInput);
+  };
+
+  const submitNpcMessage = async (raw: string) => {
+    const message = raw.trim();
     if (!message || npcThinking || npcPhase !== "active") return;
     setChatInput("");
     setNpcThinking(true);
@@ -323,6 +421,8 @@ export const SpaceApp = () => {
             thinking={npcThinking}
             onActivate={handleNpcActivate}
             onError={(message) => pushToast(`NPC表示エラー: ${message}`)}
+            walk={npcWalk}
+            onWalkDone={onNpcWalkDone}
           />
         )}
         <Player
@@ -435,6 +535,18 @@ export const SpaceApp = () => {
                 >
                   {npcThinking ? "…" : "送信"}
                 </button>
+                <button
+                  type="button"
+                  onClick={toggleVoiceInput}
+                  title="音声で質問する"
+                  className={`whitespace-nowrap rounded-full px-4 py-2.5 text-sm font-medium text-white transition ${
+                    listening
+                      ? "animate-pulse bg-red-600 hover:bg-red-500"
+                      : "bg-gray-700/90 hover:bg-gray-600"
+                  }`}
+                >
+                  🎤
+                </button>
               </form>
             )}
             <button
@@ -501,6 +613,35 @@ export const SpaceApp = () => {
           </div>
         </>
       )}
+
+      {/* 行き先パネル(guidePoints) */}
+      {!entered &&
+        npcPhase === "active" &&
+        npcStarted &&
+        (npcConfig?.guidePoints?.length ?? 0) > 0 && (
+          <div className="fixed left-4 top-20 z-10 w-56 rounded-2xl bg-black/70 p-3 shadow-xl backdrop-blur">
+            <p className="mb-2 px-1 text-xs font-semibold text-gray-300">
+              📍 行き先
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {npcConfig?.guidePoints?.map((gp, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => startGuide(gp)}
+                  className="flex items-center justify-between rounded-lg bg-gray-800/80 px-3 py-2 text-left text-xs text-white transition hover:bg-gray-700"
+                >
+                  <span className="truncate">
+                    {gp.buttonLabel || gp.name || `行き先${i + 1}`}
+                  </span>
+                  <span className="ml-2 shrink-0 text-cyan-300">
+                    {gp.type === "spaceUrl" ? "↗" : "🚶"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
       {/* エラートースト */}
       {toasts.length > 0 && (

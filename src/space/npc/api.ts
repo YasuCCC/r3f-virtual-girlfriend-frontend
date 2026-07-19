@@ -30,7 +30,51 @@ export type NpcConfig = {
     offsetZ?: number;
   };
   startMessage?: string;
+  guidePoints?: GuidePoint[];
+  /** NPCの誘導歩行速度(m/s) */
+  walkSpeed?: number;
 };
+
+export type GuidePoint = {
+  name?: string;
+  buttonLabel?: string;
+  keywords?: string;
+  /** walk=空間内を誘導歩行 / spaceUrl=別スペースへのリンク */
+  type?: "walk" | "spaceUrl";
+  x?: number;
+  y?: number;
+  z?: number;
+  spaceUrl?: string;
+  /** 誘導開始時にNPCが話す言葉 */
+  guideMessage?: string;
+  /** 到着時にNPCが話す言葉 */
+  arrivalMessage?: string;
+  /** 経由点。"x, y, z" を ";" 区切りで複数指定可 */
+  waypoints?: string;
+};
+
+/** waypoints文字列と目的地から歩行経路を組み立てる */
+export function buildGuidePath(gp: GuidePoint): [number, number, number][] {
+  const path: [number, number, number][] = [];
+  const raw = (gp.waypoints ?? "").trim();
+  if (raw) {
+    for (const part of raw.split(/[;\n]/)) {
+      const nums = part
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isFinite(n));
+      if (nums.length >= 3) path.push([nums[0], nums[1], nums[2]]);
+    }
+  }
+  if (
+    Number.isFinite(gp.x) &&
+    Number.isFinite(gp.y) &&
+    Number.isFinite(gp.z)
+  ) {
+    path.push([gp.x as number, gp.y as number, gp.z as number]);
+  }
+  return path;
+}
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
@@ -91,7 +135,7 @@ export async function sendChat({
       systemPrompt: buildSystemPrompt(config),
       knowledge: buildKnowledge(config),
       history,
-      guidePoints: [],
+      guidePoints: config?.guidePoints ?? [],
     }),
   });
   if (!res.ok) throw new Error(`chat API HTTP ${res.status}`);

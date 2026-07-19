@@ -119,6 +119,8 @@ type NpcAvatarProps = {
   speechLevelRef?: React.MutableRefObject<(() => number) | null>;
   /** 着せ替えパーツ・ロゴ・色のカスタマイズ */
   customization?: AvatarCustomization;
+  /** 診断メッセージの通知先(開発モードのアバター情報表示用) */
+  onInfo?: (message: string) => void;
 };
 
 const NpcAvatarInner = ({
@@ -137,6 +139,7 @@ const NpcAvatarInner = ({
   highlight,
   speechLevelRef,
   customization,
+  onInfo,
 }: NpcAvatarProps) => {
   const group = useRef<THREE.Group>(null);
   // 誘導歩行の進行状態(経路の残りウェイポイント)
@@ -225,9 +228,9 @@ const NpcAvatarInner = ({
   const blinkUntil = useRef(0);
   const mouthLevel = useRef(0);
 
-  // 診断: このアバターが持つ表情モーフの一覧(開発モードのみ)。
+  // 診断: このアバターの形式と表情モーフの一覧(開発モードのみ)。
   // リップシンク・まばたきが動かない場合、モーフ自体が無いのか
-  // 名前が違うのかをF12コンソールで確認できる
+  // 名前が違うのかを画面上のトーストとF12コンソールで確認できる
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const names = new Set<string>();
@@ -236,11 +239,17 @@ const NpcAvatarInner = ({
         names.add(k)
       )
     );
+    const summary = `アバター診断: ${
+      avatarUrl?.split("/").pop() ?? "標準"
+    } → 形式${vrm ? "VRM" : "GLB"} / 表情モーフ${names.size}個`;
+    onInfo?.(summary);
     console.info(
-      `[avatar] ${avatarUrl ?? "(default)"} morphs=${names.size}:`,
+      `[avatar] ${avatarUrl ?? "(default)"} type=${vrm ? "VRM" : "GLB"} morphs=${names.size}:`,
       [...names].slice(0, 60).join(", ") || "(モーフなし)"
     );
-  }, [morphMeshes, avatarUrl]);
+    // onInfoは毎レンダー新しい関数になるため依存に含めない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [morphMeshes, avatarUrl, vrm]);
 
   /** 候補名のうち存在する最初のモーフをlerpで動かす */
   const lerpMorph = (names: string[], value: number, speed: number) => {

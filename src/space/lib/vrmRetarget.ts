@@ -90,6 +90,9 @@ export function adaptClipToRig(
   const tracks: THREE.KeyframeTrack[] = [];
   for (const track of clip.tracks) {
     const [rawName, property] = track.name.split(".");
+    // 対象アバターに存在しないボーンのトラックは除外する
+    // (バインド警告の洪水と無駄な探索を防ぐ)
+    if (!targetRoot.getObjectByName(rawName)) continue;
     if (property === "position") {
       if (normalizeBoneName(rawName) !== "Hips") continue;
       tracks.push(

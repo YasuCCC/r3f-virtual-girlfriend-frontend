@@ -96,7 +96,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-16";
+const BUILD_TAG = "b0719-17";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -627,6 +627,7 @@ export const SpaceApp = () => {
             trailRef={npcTrailRef}
             speechLevelRef={speechLevelRef}
             customization={conciergeCustomization}
+            onInfo={import.meta.env.DEV ? pushToast : undefined}
           />
         )}
         {activeShop && (
@@ -646,6 +647,7 @@ export const SpaceApp = () => {
             onError={(message) => pushToast(`店舗NPC表示エラー: ${message}`)}
             speechLevelRef={speechLevelRef}
             customization={shopCustomization}
+            onInfo={import.meta.env.DEV ? pushToast : undefined}
           />
         )}
         {/* 次の店へ移動中も、離れるまでは前の店主が見送りとして残る */}

@@ -12,6 +12,10 @@ import {
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
+import {
+  applyCustomization,
+  AvatarCustomization,
+} from "../lib/avatarParts";
 import { adaptClipToRig, retargetClipToVrm } from "../lib/vrmRetarget";
 
 // Ready Player Me公式アニメーションライブラリの歩行モーション
@@ -113,6 +117,8 @@ type NpcAvatarProps = {
   highlight?: boolean;
   /** 再生中音声の音量を返す関数(リップシンク用。speaking中のみ使用) */
   speechLevelRef?: React.MutableRefObject<(() => number) | null>;
+  /** 着せ替えパーツ・ロゴ・色のカスタマイズ */
+  customization?: AvatarCustomization;
 };
 
 const NpcAvatarInner = ({
@@ -130,6 +136,7 @@ const NpcAvatarInner = ({
   trailRef,
   highlight,
   speechLevelRef,
+  customization,
 }: NpcAvatarProps) => {
   const group = useRef<THREE.Group>(null);
   // 誘導歩行の進行状態(経路の残りウェイポイント)
@@ -197,6 +204,13 @@ const NpcAvatarInner = ({
   }, [vrm, animations, walkAnimations, animRig, walkRig, avatar]);
   const { actions } = useAnimations(allAnimations, group);
   const [isWalking, setIsWalking] = useState(false);
+
+  // 着せ替えパーツ・ロゴ・色を適用する(パーツ結合はGLBのみ、ロゴ/色は共通)
+  useEffect(() => {
+    if (!customization) return;
+    const cfg = vrm ? { ...customization, parts: undefined } : customization;
+    void applyCustomization(avatar, cfg);
+  }, [avatar, customization, vrm]);
 
   // 表情用: モーフターゲットを持つメッシュ(GLBのWolf3D系)
   const morphMeshes = useMemo(() => {

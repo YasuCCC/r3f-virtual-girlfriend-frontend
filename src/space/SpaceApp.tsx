@@ -16,6 +16,7 @@ import {
   GuideTarget,
   NpcConfig,
   resolveAssetUrl,
+  resolveCustomization,
   sendChat,
   ShopNpc,
   synthesizeVoice,
@@ -95,7 +96,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-14";
+const BUILD_TAG = "b0719-15";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -571,6 +572,14 @@ export const SpaceApp = () => {
     () => (npcConfig?.routes ?? []).filter((r) => (r.stops ?? []).length > 0),
     [npcConfig]
   );
+  const conciergeCustomization = useMemo(
+    () => resolveCustomization(npcConfig?.avatarCustomization),
+    [npcConfig]
+  );
+  const shopCustomization = useMemo(
+    () => resolveCustomization(activeShop?.avatarCustomization),
+    [activeShop]
+  );
 
   return (
     <div className="h-full w-full">
@@ -617,6 +626,7 @@ export const SpaceApp = () => {
             positionRef={npcPosRef}
             trailRef={npcTrailRef}
             speechLevelRef={speechLevelRef}
+            customization={conciergeCustomization}
           />
         )}
         {activeShop && (
@@ -635,6 +645,7 @@ export const SpaceApp = () => {
             onActivate={handleShopActivate}
             onError={(message) => pushToast(`店舗NPC表示エラー: ${message}`)}
             speechLevelRef={speechLevelRef}
+            customization={shopCustomization}
           />
         )}
         {/* 次の店へ移動中も、離れるまでは前の店主が見送りとして残る */}

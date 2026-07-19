@@ -23,6 +23,8 @@ export type NpcConfig = {
   avatar?: { headLabel?: string; headLabelColor?: string };
   /** コンシェルジュの見た目(.vrm / .glb のURL) */
   avatarConfig?: { url?: string; type?: string; gender?: string };
+  /** コンシェルジュの着せ替え(パーツGLB・ロゴ・色。管理画面から設定) */
+  avatarCustomization?: AvatarCustomizationConfig;
   fallback?: { message?: string };
   readings?: Record<string, string>;
   spawn?: {
@@ -61,7 +63,43 @@ export type ShopNpc = {
   knowledgeCachedText?: string;
   avatarUrl?: string;
   voice?: NpcConfig["voice"];
+  /** 店舗ユニフォーム等の着せ替え(パーツGLB・ロゴ・色) */
+  avatarCustomization?: AvatarCustomizationConfig;
 };
+
+/** 管理画面に保存する着せ替え設定(URLは配信用に変換してから使う) */
+export type AvatarCustomizationConfig = {
+  parts?: string[];
+  logo?: {
+    url?: string;
+    mesh?: string;
+    rect?: [number, number, number, number];
+  };
+  colors?: Record<string, string>;
+};
+
+/** 着せ替え設定内のURLをプロキシ経由へ変換する */
+export function resolveCustomization(
+  cfg: AvatarCustomizationConfig | undefined
+):
+  | {
+      parts?: string[];
+      logo?: { url: string; mesh?: string; rect?: [number, number, number, number] };
+      colors?: Record<string, string>;
+    }
+  | undefined {
+  if (!cfg) return undefined;
+  const logoUrl = resolveAssetUrl(cfg.logo?.url);
+  return {
+    parts: cfg.parts
+      ?.map((p) => resolveAssetUrl(p))
+      .filter((p): p is string => Boolean(p)),
+    logo: logoUrl
+      ? { url: logoUrl, mesh: cfg.logo?.mesh, rect: cfg.logo?.rect }
+      : undefined,
+    colors: cfg.colors,
+  };
+}
 
 /**
  * 店舗NPC(店主)の会話ペルソナ。到着後の質問はこの設定で回答する

@@ -35,6 +35,16 @@ export type NpcConfig = {
   shopNpcs?: ShopNpc[];
   /** NPCの誘導歩行速度(m/s) */
   walkSpeed?: number;
+  /** 周遊ルート(複数の行き先を順番に案内するコース) */
+  routes?: TourRoute[];
+};
+
+export type TourRoute = {
+  name?: string;
+  description?: string;
+  durationMin?: number;
+  /** 立ち寄る行き先。nameでguidePoints/店舗NPCと照合する */
+  stops?: { name?: string }[];
 };
 
 export type ShopNpc = {

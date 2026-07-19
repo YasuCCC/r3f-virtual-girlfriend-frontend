@@ -18,6 +18,7 @@ import {
   sendChat,
   ShopNpc,
   synthesizeVoice,
+  TourRoute,
 } from "./npc/api";
 import { SpaceDefinition, SPACES } from "./spaces";
 
@@ -92,7 +93,7 @@ type NpcPhase = "hidden" | "summoning" | "active";
 type Speaker = "concierge" | "shop";
 
 /** 不具合報告時にどのコードが動いているか特定するためのビルドタグ */
-const BUILD_TAG = "b0719-4";
+const BUILD_TAG = "b0719-5";
 
 /** 開発モード時のみ、カメラ座標とビルドタグを画面隅に表示する */
 const DevDebugBadge = () => {
@@ -158,6 +159,10 @@ export const SpaceApp = () => {
   const npcPosRef = useRef(new THREE.Vector3());
   // NPCの足跡。プレイヤーはこれをなぞって追従する(建物を突き抜けない)
   const npcTrailRef = useRef<THREE.Vector3[]>([]);
+  // 店主NPC登場時などに一度だけユーザーの視線を向ける対象
+  const focusRef = useRef<{ x: number; y: number; z: number } | null>(null);
+  // 周遊ルートの残り行き先(到着ごとに一定時間後、次へ案内する)
+  const tourQueue = useRef<GuideTarget[]>([]);
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
@@ -216,6 +221,8 @@ export const SpaceApp = () => {
     activeShopRef.current = null;
     followRef.current.active = false;
     npcTrailRef.current.length = 0;
+    tourQueue.current = [];
+    focusRef.current = null;
     recognitionRef.current?.stop();
     setNpcWalk(null);
     setNpcPhase("hidden");
@@ -286,7 +293,9 @@ export const SpaceApp = () => {
   };
 
   /** 行き先案内: walkはNPCが誘導歩行、spaceUrlはスペース移動/リンク */
-  const startGuide = (gp: GuideTarget) => {
+  const startGuide = (gp: GuideTarget, fromTour = false) => {
+    // 手動で行き先を選んだら進行中の周遊ルートは中止する
+    if (!fromTour) tourQueue.current = [];
     if (gp.type === "spaceUrl" && gp.spaceUrl) {
       const slug = gp.spaceUrl.replace(/\/+$/, "").split("/").pop() ?? "";
       const target = SPACES.find((s) => s.id === slug);
@@ -305,7 +314,12 @@ export const SpaceApp = () => {
     setShopBubble(null);
     activeGuide.current = gp;
     const seq = ++guideSeq.current;
-    const speed = npcConfigRef.current?.walkSpeed ?? 3;
+    // 速すぎる設定値は足の動きが不自然になるため、自然な歩行の範囲に収める
+    const speed = THREE.MathUtils.clamp(
+      npcConfigRef.current?.walkSpeed ?? 1.4,
+      0.8,
+      2.0
+    );
     const beginWalk = () => {
       // 待っている間に別の行き先が選ばれた/リセットされた場合は開始しない
       if (seq !== guideSeq.current) return;
@@ -326,22 +340,78 @@ export const SpaceApp = () => {
     }
   };
 
+  /** 周遊ルート: 登録された行き先を順番に案内する */
+  const startTour = (route: TourRoute) => {
+    const stops = (route.stops ?? [])
+      .map((stop) =>
+        guideTargets.find(
+          (g) => (g.name ?? g.buttonLabel) === stop.name && g.type !== "spaceUrl"
+        )
+      )
+      .filter((g): g is GuideTarget => Boolean(g));
+    if (stops.length === 0) return;
+    tourQueue.current = stops.slice(1);
+    const seq = ++guideSeq.current;
+    const intro = route.description;
+    if (intro) {
+      setNpcBubble(intro);
+      const spoken = playNpcAudio(intro, "concierge");
+      const minWait = new Promise((resolve) => setTimeout(resolve, 1200));
+      void Promise.all([spoken, minWait]).then(() => {
+        if (seq !== guideSeq.current) return;
+        startGuide(stops[0], true);
+      });
+    } else {
+      startGuide(stops[0], true);
+    }
+  };
+
   const onNpcWalkDone = () => {
     followRef.current.active = false;
     const gp = activeGuide.current;
     activeGuide.current = null;
-    if (!gp) return;
+    if (!gp) return; // 横へどく歩行など、案内以外の歩行完了は何もしない
     if (gp.shop) {
       // 店舗に到着: 店主NPCが現れて挨拶し、以降の質問は店主が回答する
-      activeShopRef.current = gp.shop;
-      setActiveShop(gp.shop);
+      const shop = gp.shop;
+      activeShopRef.current = shop;
+      setActiveShop(shop);
       setNpcBubble(null);
-      const greet = gp.shop.greeting || `いらっしゃいませ。${gp.shop.name}です。`;
+      // 案内人は横へ一歩どいて、ユーザーと店主が向かい合えるようにする
+      const sx = shop.x ?? 0;
+      const sy = shop.y ?? 0;
+      const sz = shop.z ?? 0;
+      const crumbs = npcTrailRef.current;
+      const from = crumbs.length > 1 ? crumbs[crumbs.length - 2] : null;
+      let dirX = 0;
+      let dirZ = 1;
+      if (from) {
+        dirX = npcPosRef.current.x - from.x;
+        dirZ = npcPosRef.current.z - from.z;
+      }
+      const len = Math.hypot(dirX, dirZ) || 1;
+      setNpcWalk({
+        id: ++walkSeq.current,
+        path: [[sx + (dirZ / len) * 2, sy, sz - (dirX / len) * 2]],
+        speed: 1.2,
+      });
+      // ユーザーの視線を店主のほうへ向ける
+      focusRef.current = { x: sx, y: sy + 1.4, z: sz };
+      const greet = shop.greeting || `いらっしゃいませ。${shop.name}です。`;
       setShopBubble(greet);
       void playNpcAudio(greet, "shop");
     } else if (gp.arrivalMessage) {
       setNpcBubble(gp.arrivalMessage);
       void playNpcAudio(gp.arrivalMessage, "concierge");
+    }
+    // 周遊ルート中なら、しばらく滞在してから次の行き先へ案内する
+    if (tourQueue.current.length > 0) {
+      const seq = guideSeq.current;
+      setTimeout(() => {
+        if (seq !== guideSeq.current) return;
+        const next = tourQueue.current.shift();
+        if (next) startGuide(next, true);
+      }, 12000);
     }
   };
 
@@ -354,19 +424,21 @@ export const SpaceApp = () => {
     setActiveSpace(def);
   };
 
-  const loadSelected = () => {
+  /** 「空間に入る」: 選択中スペースの読み込みと入場を同時に行う */
+  const enterSpace = () => {
     const def = SPACES.find((s) => s.id === selectedId);
-    if (!def) return;
-    if (activeSpace?.id === def.id) return;
-    loadSpace(def);
+    if (def && activeSpace?.id !== def.id) loadSpace(def);
+    setStarted(true);
   };
 
   const loadCustomUrl = (e: FormEvent) => {
     e.preventDefault();
     const url = urlInput.trim();
     if (!url) return;
-    if (activeSpace?.id === "custom" && activeSpace.splatUrl === url) return;
-    loadSpace({ id: "custom", title: "カスタムURL", splatUrl: url });
+    if (activeSpace?.id !== "custom" || activeSpace.splatUrl !== url) {
+      loadSpace({ id: "custom", title: "カスタムURL", splatUrl: url });
+    }
+    setStarted(true);
   };
 
   /** 音声入力(Web Speech API)。認識結果をそのまま質問として送信する */
@@ -460,6 +532,10 @@ export const SpaceApp = () => {
 
   const npcAvailable = Boolean(activeSpace?.npc);
   const guideTargets = useMemo(() => buildGuideTargets(npcConfig), [npcConfig]);
+  const tourRoutes = useMemo(
+    () => (npcConfig?.routes ?? []).filter((r) => (r.stops ?? []).length > 0),
+    [npcConfig]
+  );
 
   return (
     <div className="h-full w-full">
@@ -488,8 +564,13 @@ export const SpaceApp = () => {
         {activeSpace?.npc && npcPhase === "active" && (
           <NpcAvatar
             position={activeSpace.npc.position}
-            headLabel={npcConfig?.avatar?.headLabel}
+            headLabel={
+              npcStarted
+                ? npcConfig?.avatar?.headLabel
+                : "AIコンシェルジュ"
+            }
             headLabelColor={npcConfig?.avatar?.headLabelColor}
+            highlight={!npcStarted}
             speaking={npcSpeaking && speaker === "concierge"}
             bubbleText={npcBubble}
             thinking={npcThinking && !activeShop}
@@ -525,6 +606,7 @@ export const SpaceApp = () => {
           followRef={followRef}
           followTargetRef={npcPosRef}
           followPathRef={npcTrailRef}
+          focusRef={focusRef}
         />
       </Canvas>
 
@@ -537,17 +619,6 @@ export const SpaceApp = () => {
               現在のスペース: {activeSpace.title}
             </p>
           )}
-          <button
-            type="button"
-            onClick={() => setStarted(true)}
-            className="pointer-events-auto rounded-full bg-indigo-500 px-8 py-3 text-lg font-semibold text-white shadow-lg transition hover:bg-indigo-400"
-          >
-            クリックして空間に入る
-          </button>
-          <p className="text-sm text-gray-300">
-            ドラッグ: 視点 ・ WASD / 矢印キー: 移動 ・ Shift: 走る
-          </p>
-
           <div className="pointer-events-auto flex w-full max-w-xl items-center gap-2 px-4">
             <select
               value={selectedId}
@@ -560,14 +631,17 @@ export const SpaceApp = () => {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              onClick={loadSelected}
-              className="whitespace-nowrap rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
-            >
-              スペース読込
-            </button>
           </div>
+          <button
+            type="button"
+            onClick={enterSpace}
+            className="pointer-events-auto rounded-full bg-indigo-500 px-8 py-3 text-lg font-semibold text-white shadow-lg transition hover:bg-indigo-400"
+          >
+            クリックして空間に入る
+          </button>
+          <p className="text-sm text-gray-300">
+            ドラッグ: 視点 ・ WASD / 矢印キー: 移動 ・ Shift: 走る
+          </p>
 
           <form
             onSubmit={loadCustomUrl}
@@ -691,12 +765,38 @@ export const SpaceApp = () => {
         </div>
       )}
 
-      {/* 行き先パネル(guidePoints + 誘導ONの店舗NPC) */}
+      {/* 行き先パネル(コンシェルジュの登場と同時に表示) */}
       {started &&
         npcPhase === "active" &&
-        npcStarted &&
-        guideTargets.length > 0 && (
+        (guideTargets.length > 0 || tourRoutes.length > 0) && (
           <div className="fixed left-4 top-20 z-10 w-56 rounded-2xl bg-black/70 p-3 shadow-xl backdrop-blur">
+            {tourRoutes.length > 0 && (
+              <>
+                <p className="mb-2 px-1 text-xs font-semibold text-gray-300">
+                  🧭 周遊ルート
+                </p>
+                <div className="mb-3 flex flex-col gap-1.5">
+                  {tourRoutes.map((route, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => startTour(route)}
+                      className="rounded-lg bg-indigo-900/80 px-3 py-2 text-left text-xs text-white transition hover:bg-indigo-800"
+                    >
+                      <span className="block truncate font-medium">
+                        {route.name || `コース${i + 1}`}
+                        {route.durationMin ? `(約${route.durationMin}分)` : ""}
+                      </span>
+                      {route.description && (
+                        <span className="mt-0.5 block truncate text-[10px] text-gray-300">
+                          {route.description}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
             <p className="mb-2 px-1 text-xs font-semibold text-gray-300">
               📍 行き先
             </p>

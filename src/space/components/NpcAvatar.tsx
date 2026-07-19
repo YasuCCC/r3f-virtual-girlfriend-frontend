@@ -15,13 +15,60 @@ import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 // (https://github.com/readyplayerme/animation-library)
 const WALK_URL = "/animations/F_Walk_002.glb";
 const WALK_CLIP_NAME = "F_Walk_002";
-/** F_Walk_002が表現するおおよその歩行速度(m/s)。timeScale同期に使う */
-const WALK_CLIP_BASE_SPEED = 1.3;
+/**
+ * F_Walk_002の実際の歩行速度(m/s)。クリップ内の腰の前進量(4.4m/3.125s)から
+ * 算出した値で、timeScale同期に使う
+ */
+const WALK_CLIP_BASE_SPEED = 1.4;
 
 const AVATAR_URL = "/models/64f1a714fe61576b46f27ca2.glb";
 const ANIMATIONS_URL = "/models/animations.glb";
 /** ポインターロック中の照準クリックで会話開始できる最大距離(m) */
 const ACTIVATE_DISTANCE = 30;
+
+/**
+ * 未会話のNPCを囲む光のバリア。脈動して目立たせ、クリックを促す
+ * (会話開始とともに消える)
+ */
+const ConciergeBeacon = () => {
+  const wallMat = useRef<THREE.MeshBasicMaterial>(null);
+  const ring = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    const pulse = 0.5 + 0.5 * Math.sin(clock.getElapsedTime() * 2.5);
+    if (wallMat.current) wallMat.current.opacity = 0.06 + 0.1 * pulse;
+    if (ring.current) {
+      const s = 1 + 0.18 * pulse;
+      ring.current.scale.set(s, s, 1);
+      (ring.current.material as THREE.MeshBasicMaterial).opacity =
+        0.35 + 0.45 * pulse;
+    }
+  });
+  return (
+    <group>
+      <mesh position={[0, 1.05, 0]}>
+        <cylinderGeometry args={[0.85, 0.85, 2.1, 32, 1, true]} />
+        <meshBasicMaterial
+          ref={wallMat}
+          color="#22d3ee"
+          transparent
+          opacity={0.12}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh ref={ring} position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.72, 0.95, 48]} />
+        <meshBasicMaterial
+          color="#22d3ee"
+          transparent
+          opacity={0.6}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  );
+};
 
 export type NpcWalkCommand = {
   /** 変わるたびに新しい歩行として実行される */
@@ -49,6 +96,8 @@ type NpcAvatarProps = {
   positionRef?: React.MutableRefObject<THREE.Vector3>;
   /** 歩行中に足跡を積むref(プレイヤーはこの足跡をなぞって追従する) */
   trailRef?: React.MutableRefObject<THREE.Vector3[]>;
+  /** 光のバリアで囲んで目立たせる(会話開始前のクリック誘導) */
+  highlight?: boolean;
 };
 
 const NpcAvatarInner = ({
@@ -63,6 +112,7 @@ const NpcAvatarInner = ({
   onWalkDone,
   positionRef,
   trailRef,
+  highlight,
 }: NpcAvatarProps) => {
   const group = useRef<THREE.Group>(null);
   // 誘導歩行の進行状態(経路の残りウェイポイント)
@@ -76,7 +126,26 @@ const NpcAvatarInner = ({
   // 既存アバターアプリと同じGLBを使うため、シーンを複製して干渉を避ける
   const avatar = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { animations } = useGLTF(ANIMATIONS_URL);
-  const { animations: walkAnimations } = useGLTF(WALK_URL);
+  const { animations: walkAnimationsRaw } = useGLTF(WALK_URL);
+  // 歩行クリップにはルートモーション(腰が前へ4.4m進んでループ先頭に戻る)が
+  // 含まれており、コード側の移動と二重になってガクッと戻る原因になるため、
+  // 腰の水平移動成分を除去する(上下の弾みは残す)
+  const walkAnimations = useMemo(
+    () =>
+      walkAnimationsRaw.map((clip) => {
+        const cloned = clip.clone();
+        for (const track of cloned.tracks) {
+          if (track.name.endsWith("Hips.position")) {
+            for (let i = 0; i < track.values.length; i += 3) {
+              track.values[i] = 0;
+              track.values[i + 2] = 0;
+            }
+          }
+        }
+        return cloned;
+      }),
+    [walkAnimationsRaw]
+  );
   const allAnimations = useMemo(
     () => [...animations, ...walkAnimations],
     [animations, walkAnimations]
@@ -96,8 +165,12 @@ const NpcAvatarInner = ({
     const action = actions[animationName];
     if (!action) return;
     if (animationName === WALK_CLIP_NAME) {
-      // 歩行速度に合わせて足の回転速度を同期させる
-      action.timeScale = walkSpeed.current / WALK_CLIP_BASE_SPEED;
+      // 歩行速度に合わせて足の回転速度を同期させる(不自然な高速回転は抑える)
+      action.timeScale = THREE.MathUtils.clamp(
+        walkSpeed.current / WALK_CLIP_BASE_SPEED,
+        0.6,
+        1.6
+      );
     }
     action.reset().fadeIn(0.3).play();
     return () => {
@@ -205,6 +278,7 @@ const NpcAvatarInner = ({
   return (
     <group ref={group} position={position}>
       <primitive object={avatar} />
+      {highlight && <ConciergeBeacon />}
       {(headLabel || bubbleText || thinking) && (
         <Html
           position={[0, 2.05, 0]}

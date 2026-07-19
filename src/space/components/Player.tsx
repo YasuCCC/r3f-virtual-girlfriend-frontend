@@ -49,6 +49,11 @@ type PlayerProps = {
    * 衝突メッシュをよじ登って上空視点になるのを防ぐ
    */
   followPathRef?: MutableRefObject<THREE.Vector3[]>;
+  /**
+   * 一度だけ視線を向けたい対象(店主NPCの登場時など)。向き終わるか
+   * ユーザーがドラッグ操作したら自動でクリアされる
+   */
+  focusRef?: MutableRefObject<{ x: number; y: number; z: number } | null>;
 };
 
 /**
@@ -65,6 +70,7 @@ export const Player = ({
   followRef,
   followTargetRef,
   followPathRef,
+  focusRef,
 }: PlayerProps) => {
   const keys = useRef<Record<string, boolean>>({});
   const camera = useThree((state) => state.camera);
@@ -281,6 +287,32 @@ export const Player = ({
           target.y + EYE_HEIGHT + 2
         );
         return;
+      }
+    }
+
+    // 店主NPC登場時などの「一度だけ視線を向ける」処理
+    const focus = focusRef?.current;
+    if (focus) {
+      if (dragging.current) {
+        // ユーザーが自分で視点を動かし始めたら任せる
+        focusRef.current = null;
+      } else {
+        const fdx = focus.x - camera.position.x;
+        const fdz = focus.z - camera.position.z;
+        const fdist = Math.hypot(fdx, fdz);
+        const targetYaw = Math.atan2(-fdx, -fdz);
+        const targetPitch = THREE.MathUtils.clamp(
+          Math.atan2(focus.y - camera.position.y, fdist),
+          -PITCH_LIMIT,
+          PITCH_LIMIT
+        );
+        let yawDiff = targetYaw - yaw.current;
+        while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+        while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+        const s = Math.min(1, delta * 4);
+        yaw.current += yawDiff * s;
+        pitch.current += (targetPitch - pitch.current) * s;
+        if (Math.abs(yawDiff) < 0.03) focusRef.current = null;
       }
     }
 

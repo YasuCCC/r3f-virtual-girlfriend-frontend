@@ -26,6 +26,8 @@ export type SpaceDefinition = {
   scale?: number;
   /** プレイヤーの初期位置 */
   spawn?: [number, number, number];
+  /** プレイヤーの初期の向き(Y軸回転・度。0=-Z方向、180=+Z方向) */
+  spawnYawDeg?: number;
   light?: {
     type: "directional";
     rotationDeg: number;
@@ -57,7 +59,10 @@ export const SPACES: SpaceDefinition[] = [
     // centerRotation (x=-180は上下反転として適用済み, y=89.02)
     rotationYDeg: 89.02,
     scale: 4,
-    spawn: [0, 1.6, 0],
+    // ユーザー実測のスポーン位置 (-0.01, 0.08, -7.00) + 目線1.6m
+    spawn: [-0.01, 1.68, -7.0],
+    // NPC(z=-3)の方を向いてスタート
+    spawnYawDeg: 180,
     light: { type: "directional", rotationDeg: 275, intensity: 1.3 },
     // configはスラッグ(URLの末尾)をキーに保存されている
     npc: { position: [0, 0, -3], spaceId: "k_hall_entrance1" },
@@ -88,6 +93,8 @@ export const SPACES: SpaceDefinition[] = [
     scale: 1.25,
     // Arrivalで実測したスポーン位置 (0.08, -0.15, -7.00) + 目線1.6m
     spawn: [0.08, 1.45, -7.0],
+    // NPC(z=-3)の方を向いてスタート(従来は反対の突き当たり側を向いていた)
+    spawnYawDeg: 180,
     light: { type: "directional", rotationDeg: 275, intensity: 1.3 },
     npc: { position: [0, 0, -3], spaceId: "east_street01" },
   },

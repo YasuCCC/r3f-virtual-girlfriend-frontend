@@ -316,6 +316,7 @@ export const SpaceApp = () => {
           }}
           collisionRef={collisionRef}
           spawn={activeSpace?.spawn ?? [0, 1.6, 4]}
+          spawnYawDeg={activeSpace?.spawnYawDeg ?? 0}
           requireLock={requireLock}
           lockRef={lockRef}
         />

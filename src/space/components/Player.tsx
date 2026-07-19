@@ -20,6 +20,8 @@ type PlayerProps = {
   /** レイキャスト対象の衝突メッシュ(CollisionMeshが設定する) */
   collisionRef?: MutableRefObject<THREE.Object3D | null>;
   spawn?: [number, number, number];
+  /** スポーン時の向き(Y軸回転・度。0=-Z方向、180=+Z方向) */
+  spawnYawDeg?: number;
   /** デバッグ用: ポインターロックなしでも移動を許可(?nolock) */
   requireLock?: boolean;
   /** UI側からポインターロックを開始するための関数を受け取るref */
@@ -31,6 +33,7 @@ export const Player = ({
   onLockChange,
   collisionRef,
   spawn = [0, EYE_HEIGHT, 4],
+  spawnYawDeg = 0,
   requireLock = true,
   lockRef,
 }: PlayerProps) => {
@@ -47,7 +50,8 @@ export const Player = ({
 
   useEffect(() => {
     camera.position.set(spawn[0], spawn[1], spawn[2]);
-  }, [camera, spawn]);
+    camera.rotation.set(0, (spawnYawDeg * Math.PI) / 180, 0);
+  }, [camera, spawn, spawnYawDeg]);
 
   useEffect(() => {
     if (!lockRef) return;

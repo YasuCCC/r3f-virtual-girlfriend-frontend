@@ -251,15 +251,27 @@ const NpcAvatarInner = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [morphMeshes, avatarUrl, vrm]);
 
-  /** 候補名のうち存在する最初のモーフをlerpで動かす */
-  const lerpMorph = (names: string[], value: number, speed: number) => {
+  /**
+   * 候補名のうち存在する最初のモーフをlerpで動かす。
+   * fallbackToFirst指定時は、候補が1つも無いメッシュで先頭のモーフを使う
+   * (Arrival変換のGLBはモーフ名が消えているが口用モーフが1つ残っているため)
+   */
+  const lerpMorph = (
+    names: string[],
+    value: number,
+    speed: number,
+    fallbackToFirst = false
+  ) => {
     for (const mesh of morphMeshes) {
       const dict = mesh.morphTargetDictionary;
       const influences = mesh.morphTargetInfluences;
-      if (!dict || !influences) continue;
+      if (!dict || !influences || influences.length === 0) continue;
       const name = names.find((n) => dict[n] !== undefined);
-      if (name === undefined) continue;
-      const idx = dict[name];
+      let idx: number | undefined = name !== undefined ? dict[name] : undefined;
+      if (idx === undefined) {
+        if (!fallbackToFirst) continue;
+        idx = 0;
+      }
       influences[idx] = THREE.MathUtils.lerp(influences[idx], value, speed);
     }
   };
@@ -378,7 +390,8 @@ const NpcAvatarInner = ({
       lerpMorph(
         ["viseme_aa", "viseme_AA", "mouthOpen", "jawOpen"],
         mouthLevel.current,
-        0.5
+        0.5,
+        true
       );
       lerpMorph(["viseme_O", "viseme_o"], mouthLevel.current * 0.3, 0.5);
     }

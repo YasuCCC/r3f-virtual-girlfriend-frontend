@@ -41,10 +41,11 @@ export const SPACES: SpaceDefinition[] = [
     // https://live.arrival.space/east_street01 (Yokohama East Avenue01 / 55732136_2242)
     id: "east_street01",
     title: "Yokohama East Avenue01",
+    // CORS回避のためVite開発サーバのプロキシ(/arrival-cdn)経由で取得する
     splatUrl:
-      "https://dzrmwng2ae8bq.cloudfront.net/55732136/49c18498ea8c26252e629c1418df9d505cbbcf57f81fbbfe72b42167992dc0ec_yokohama-2.sog",
+      "/arrival-cdn/55732136/49c18498ea8c26252e629c1418df9d505cbbcf57f81fbbfe72b42167992dc0ec_yokohama-2.sog",
     collisionUrl:
-      "https://dzrmwng2ae8bq.cloudfront.net/55732136/881dbc6cb75073296b30763e89ad95464030f9389664c20edce6d1569838d920_49c18498ea8c26252e629c1418df9d505cbbcf57f81fbbfe72b42167992dc0ec_yokohama-2_collision.glb",
+      "/arrival-cdn/55732136/881dbc6cb75073296b30763e89ad95464030f9389664c20edce6d1569838d920_49c18498ea8c26252e629c1418df9d505cbbcf57f81fbbfe72b42167992dc0ec_yokohama-2_collision.glb",
     // centerPosition (-0.366, -0.341, 19.899) + assetYOffset 0.2
     position: [-0.366, -0.141, 19.899],
     // centerRotation.y = 53.13 (z=180はスプラットの上下反転として適用済み)

@@ -17,6 +17,21 @@ const fixSparkWasmDataUri = (): Plugin => ({
   },
 });
 
+// ArrivalのCDNはlocalhostからの直接fetchをCORSで拒否するため、
+// 開発サーバ経由で中継する
+const arrivalProxy = {
+  "/arrival-cdn": {
+    target: "https://dzrmwng2ae8bq.cloudfront.net",
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/arrival-cdn/, ""),
+  },
+  "/arrival-ugc": {
+    target: "https://ugc.arrival.space",
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/arrival-ugc/, ""),
+  },
+};
+
 // https://vitejs.dev/config/
 export default defineConfig({
   // GitHub Pagesなどサブパス配信でも動くよう相対パスでビルドする
@@ -26,6 +41,8 @@ export default defineConfig({
     // 事前バンドルされると上記transformを通らないため除外する
     exclude: ["@sparkjsdev/spark"],
   },
+  server: { proxy: arrivalProxy },
+  preview: { proxy: arrivalProxy },
   build: {
     rollupOptions: {
       input: {

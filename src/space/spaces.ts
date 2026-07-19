@@ -59,7 +59,8 @@ export const SPACES: SpaceDefinition[] = [
     scale: 4,
     spawn: [0, 1.6, 0],
     light: { type: "directional", rotationDeg: 275, intensity: 1.3 },
-    npc: { position: [0, 0, -3], spaceId: "55732136_9974" },
+    // configはスラッグ(URLの末尾)をキーに保存されている
+    npc: { position: [0, 0, -3], spaceId: "k_hall_entrance1" },
   },
   {
     // https://live.arrival.space/east_street01 (Yokohama East Avenue01 / 55732136_2242)
@@ -88,6 +89,6 @@ export const SPACES: SpaceDefinition[] = [
     // Arrivalで実測したスポーン位置 (0.08, -0.15, -7.00) + 目線1.6m
     spawn: [0.08, 1.45, -7.0],
     light: { type: "directional", rotationDeg: 275, intensity: 1.3 },
-    npc: { position: [0, 0, -3], spaceId: "55732136_2242" },
+    npc: { position: [0, 0, -3], spaceId: "east_street01" },
   },
 ];

@@ -43,6 +43,8 @@ type NpcAvatarProps = {
   /** 誘導歩行の指示(guidePoints) */
   walk?: NpcWalkCommand | null;
   onWalkDone?: (id: number) => void;
+  /** 現在位置を毎フレーム共有するref(プレイヤーの自動追従に使う) */
+  positionRef?: React.MutableRefObject<THREE.Vector3>;
 };
 
 const NpcAvatarInner = ({
@@ -55,6 +57,7 @@ const NpcAvatarInner = ({
   onActivate,
   walk,
   onWalkDone,
+  positionRef,
 }: NpcAvatarProps) => {
   const group = useRef<THREE.Group>(null);
   // 誘導歩行の進行状態(経路の残りウェイポイント)
@@ -174,6 +177,8 @@ const NpcAvatarInner = ({
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
     group.current.rotation.y = current + diff * Math.min(1, delta * 5);
+
+    positionRef?.current.copy(group.current.position);
   });
 
   return (

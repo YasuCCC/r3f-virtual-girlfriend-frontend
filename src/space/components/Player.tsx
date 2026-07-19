@@ -26,7 +26,14 @@ type PlayerProps = {
   requireLock?: boolean;
   /** UI側からポインターロックを開始するための関数を受け取るref */
   lockRef?: MutableRefObject<(() => void) | null>;
+  /** NPC誘導中の自動追従(activeの間、NPCの後ろを保って移動する) */
+  followRef?: MutableRefObject<{ active: boolean; speed: number }>;
+  /** 追従対象(NPC)の現在位置 */
+  followTargetRef?: MutableRefObject<THREE.Vector3>;
 };
+
+/** 追従時にNPCと保つ距離(m) */
+const FOLLOW_DISTANCE = 3;
 
 export const Player = ({
   bounds = 13.5,
@@ -36,6 +43,8 @@ export const Player = ({
   spawnYawDeg = 0,
   requireLock = true,
   lockRef,
+  followRef,
+  followTargetRef,
 }: PlayerProps) => {
   const controls = useRef<ElementRef<typeof PointerLockControls>>(null);
   const keys = useRef<Record<string, boolean>>({});
@@ -47,6 +56,10 @@ export const Player = ({
   const raycaster = useRef(new THREE.Raycaster());
   const rayOrigin = useRef(new THREE.Vector3());
   const down = useRef(new THREE.Vector3(0, -1, 0));
+  const chase = useRef(new THREE.Vector3());
+  const lookTarget = useRef(new THREE.Vector3());
+  const lookMatrix = useRef(new THREE.Matrix4());
+  const lookQuat = useRef(new THREE.Quaternion());
 
   useEffect(() => {
     camera.position.set(spawn[0], spawn[1], spawn[2]);
@@ -72,6 +85,32 @@ export const Player = ({
     };
   }, []);
 
+  // 接地: 頭上少し上から真下にレイを飛ばして地面の高さに追従する
+  const applyGrounding = (
+    collision: THREE.Object3D | null,
+    delta: number
+  ) => {
+    if (collision) {
+      rayOrigin.current
+        .copy(camera.position)
+        .setY(camera.position.y + GROUND_RAY_UP);
+      raycaster.current.set(rayOrigin.current, down.current);
+      raycaster.current.far = GROUND_RAY_FAR;
+      const hits = raycaster.current.intersectObject(collision, true);
+      if (hits.length > 0) {
+        const targetY = hits[0].point.y + EYE_HEIGHT;
+        camera.position.y +=
+          (targetY - camera.position.y) * Math.min(1, delta * 10);
+      }
+    } else {
+      camera.position.y = EYE_HEIGHT;
+    }
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__playerPos =
+        camera.position.toArray();
+    }
+  };
+
   useFrame((_, rawDelta) => {
     if (import.meta.env.DEV) {
       const w = window as unknown as Record<string, unknown>;
@@ -81,12 +120,54 @@ export const Player = ({
         w.__teleport = undefined;
       }
     }
-    if (requireLock && !controls.current?.isLocked) return;
     // 低FPS時にレイ距離・移動量が暴れないようdeltaをクランプする
     const delta = Math.min(rawDelta, 0.1);
     const k = keys.current;
-    const speed = k.ShiftLeft || k.ShiftRight ? RUN_SPEED : WALK_SPEED;
     const collision = collisionRef?.current ?? null;
+    const locked = !requireLock || Boolean(controls.current?.isLocked);
+    const moveKeyPressed = Boolean(
+      k.KeyW || k.KeyS || k.KeyA || k.KeyD ||
+      k.ArrowUp || k.ArrowDown || k.ArrowLeft || k.ArrowRight
+    );
+
+    // NPC誘導の自動追従(ポインターロックの有無に関わらず動く)
+    const follow = followRef?.current;
+    if (follow?.active && followTargetRef) {
+      if (locked && moveKeyPressed) {
+        // ユーザーが自分で歩き始めたら追従をやめる
+        follow.active = false;
+      } else {
+        const target = followTargetRef.current;
+        chase.current.set(
+          target.x - camera.position.x,
+          0,
+          target.z - camera.position.z
+        );
+        const dist = chase.current.length();
+        if (dist > FOLLOW_DISTANCE) {
+          const step = Math.min(
+            follow.speed * 1.25 * delta,
+            dist - FOLLOW_DISTANCE
+          );
+          chase.current.normalize().multiplyScalar(step);
+          camera.position.x += chase.current.x;
+          camera.position.z += chase.current.z;
+        }
+        // マウス視点操作が効かない(非ロック)間はNPCの方を向く
+        if (!document.pointerLockElement) {
+          lookTarget.current.set(target.x, target.y + 1.4, target.z);
+          lookMatrix.current.lookAt(camera.position, lookTarget.current, UP);
+          lookQuat.current.setFromRotationMatrix(lookMatrix.current);
+          camera.quaternion.slerp(lookQuat.current, Math.min(1, delta * 3));
+        }
+        // 接地処理を通すため、このフレームは以降の入力移動をスキップ
+        applyGrounding(collision, delta);
+        return;
+      }
+    }
+
+    if (!locked) return;
+    const speed = k.ShiftLeft || k.ShiftRight ? RUN_SPEED : WALK_SPEED;
 
     camera.getWorldDirection(forward.current);
     forward.current.y = 0;
@@ -133,27 +214,7 @@ export const Player = ({
       }
     }
 
-    // 接地: 頭上少し上から真下にレイを飛ばして地面の高さに追従する
-    if (collision) {
-      rayOrigin.current
-        .copy(camera.position)
-        .setY(camera.position.y + GROUND_RAY_UP);
-      raycaster.current.set(rayOrigin.current, down.current);
-      raycaster.current.far = GROUND_RAY_FAR;
-      const hits = raycaster.current.intersectObject(collision, true);
-      if (hits.length > 0) {
-        const targetY = hits[0].point.y + EYE_HEIGHT;
-        camera.position.y +=
-          (targetY - camera.position.y) * Math.min(1, delta * 10);
-      }
-    } else {
-      camera.position.y = EYE_HEIGHT;
-    }
-
-    if (import.meta.env.DEV) {
-      (window as unknown as Record<string, unknown>).__playerPos =
-        camera.position.toArray();
-    }
+    applyGrounding(collision, delta);
   });
 
   return (

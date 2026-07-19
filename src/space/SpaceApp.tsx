@@ -116,6 +116,9 @@ export const SpaceApp = () => {
   const [npcWalk, setNpcWalk] = useState<NpcWalkCommand | null>(null);
   const walkSeq = useRef(0);
   const activeGuide = useRef<GuidePoint | null>(null);
+  // 誘導中のユーザー自動追従(WASD操作で解除)
+  const followRef = useRef({ active: false, speed: 3 });
+  const npcPosRef = useRef(new THREE.Vector3());
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
@@ -160,6 +163,7 @@ export const SpaceApp = () => {
     npcConfigRef.current = null;
     npcStartedRef.current = false;
     activeGuide.current = null;
+    followRef.current.active = false;
     recognitionRef.current?.stop();
     setNpcWalk(null);
     setNpcPhase("hidden");
@@ -289,14 +293,14 @@ export const SpaceApp = () => {
       setNpcBubble(gp.guideMessage);
       void playNpcAudio(gp.guideMessage);
     }
-    setNpcWalk({
-      id: ++walkSeq.current,
-      path,
-      speed: npcConfigRef.current?.walkSpeed ?? 3,
-    });
+    const speed = npcConfigRef.current?.walkSpeed ?? 3;
+    setNpcWalk({ id: ++walkSeq.current, path, speed });
+    // ユーザー視点もNPCについて行く(WASDを押すと解除)
+    followRef.current = { active: true, speed };
   };
 
   const onNpcWalkDone = () => {
+    followRef.current.active = false;
     const gp = activeGuide.current;
     activeGuide.current = null;
     if (gp?.arrivalMessage) {
@@ -425,6 +429,7 @@ export const SpaceApp = () => {
             onError={(message) => pushToast(`NPC表示エラー: ${message}`)}
             walk={npcWalk}
             onWalkDone={onNpcWalkDone}
+            positionRef={npcPosRef}
           />
         )}
         <Player
@@ -441,6 +446,8 @@ export const SpaceApp = () => {
           spawnYawDeg={activeSpace?.spawnYawDeg ?? 0}
           requireLock={requireLock}
           lockRef={lockRef}
+          followRef={followRef}
+          followTargetRef={npcPosRef}
         />
       </Canvas>
 

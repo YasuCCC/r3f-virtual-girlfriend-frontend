@@ -9,6 +9,11 @@ export type SpaceDefinition = {
   splatUrl: string;
   /** 衝突判定用GLB(省略時は平面フロア扱い) */
   collisionUrl?: string;
+  /**
+   * ArrivalのLOD分割配信(lod-meta.json)。指定するとsplatUrlの代わりに
+   * 指定レベルのシャード一式を読み込む(0=最精細)
+   */
+  lod?: { metaUrl: string; level?: number };
   /** 衝突GLBがスプラットと同じ生座標系(Y下向き)で作られている場合true */
   collisionInSplatFrame?: boolean;
   /** スペース内でのスプラット配置(ArrivalのcenterPosition + assetYOffset相当) */
@@ -60,6 +65,13 @@ export const SPACES: SpaceDefinition[] = [
     // CORS回避のためVite開発サーバのプロキシ(/arrival-cdn)経由で取得する
     splatUrl:
       "/arrival-cdn/55732136/49c18498ea8c26252e629c1418df9d505cbbcf57f81fbbfe72b42167992dc0ec_yokohama-2.sog",
+    // Arrival本番と同じLOD分割データ。レベル2=約180万スプラット
+    // (レベル0=最精細730万は重いので必要に応じて ?lodlevel=0〜4 で変更可)
+    lod: {
+      metaUrl:
+        "/arrival-cdn/55732136/49c18498ea8c26252e629c1418df9d505cbbcf57f81fbbfe72b42167992dc0ec_yokohama-2_1783432850003_LOD/lod-meta.json",
+      level: 2,
+    },
     collisionUrl:
       "/arrival-cdn/55732136/881dbc6cb75073296b30763e89ad95464030f9389664c20edce6d1569838d920_49c18498ea8c26252e629c1418df9d505cbbcf57f81fbbfe72b42167992dc0ec_yokohama-2_collision.glb",
     // centerPosition (-0.366, -0.341, 19.899) + assetYOffset 0.2

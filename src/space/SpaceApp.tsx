@@ -3,6 +3,7 @@ import { Canvas } from "@react-three/fiber";
 import { FormEvent, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { CollisionMesh } from "./components/CollisionMesh";
+import { LodSplatLayer } from "./components/LodSplatLayer";
 import { GalleryRoom } from "./components/GalleryRoom";
 import { Player } from "./components/Player";
 import { SparkRendererMount, SplatLayer } from "./components/SplatLayer";
@@ -17,12 +18,14 @@ const ArrivalSpace = ({
   onSplatError,
   onSplatLoaded,
   onCollisionError,
+  lodLevelOverride,
 }: {
   def: SpaceDefinition;
   collisionRef: React.MutableRefObject<THREE.Object3D | null>;
   onSplatError: (message: string) => void;
   onSplatLoaded: () => void;
   onCollisionError: (message: string) => void;
+  lodLevelOverride?: number;
 }) => {
   const lightDir = useMemo(() => {
     const rot = (def.light?.rotationDeg ?? 0) * DEG;
@@ -43,12 +46,21 @@ const ArrivalSpace = ({
         rotation={[0, (def.rotationYDeg ?? 0) * DEG, 0]}
         scale={def.scale ?? 1}
       >
-        {/* スプラットは3DGSの慣習(Y下向き)のためSplatLayer内でX軸180°反転される */}
-        <SplatLayer
-          url={def.splatUrl}
-          onError={onSplatError}
-          onLoaded={onSplatLoaded}
-        />
+        {/* スプラットは3DGSの慣習(Y下向き)のため各Layer内でX軸180°反転される */}
+        {def.lod ? (
+          <LodSplatLayer
+            metaUrl={def.lod.metaUrl}
+            level={lodLevelOverride ?? def.lod.level}
+            onError={onSplatError}
+            onLoaded={() => onSplatLoaded()}
+          />
+        ) : (
+          <SplatLayer
+            url={def.splatUrl}
+            onError={onSplatError}
+            onLoaded={onSplatLoaded}
+          />
+        )}
         {def.collisionUrl && (
           <group rotation={def.collisionInSplatFrame ? [Math.PI, 0, 0] : [0, 0, 0]}>
             <CollisionMesh
@@ -78,6 +90,11 @@ export const SpaceApp = () => {
     () => !new URLSearchParams(window.location.search).has("nolock"),
     []
   );
+  // ?lodlevel=0〜4 でLODレベルを上書き(0=最精細)
+  const lodLevelOverride = useMemo(() => {
+    const v = new URLSearchParams(window.location.search).get("lodlevel");
+    return v === null ? undefined : Number(v);
+  }, []);
 
   const loadSelected = () => {
     const def = SPACES.find((s) => s.id === selectedId);
@@ -118,6 +135,7 @@ export const SpaceApp = () => {
               setError(`スプラットの読み込みに失敗しました: ${message}`);
             }}
             onSplatLoaded={() => setLoading(false)}
+            lodLevelOverride={lodLevelOverride}
             onCollisionError={(message) =>
               setNotice(
                 `衝突メッシュを読み込めなかったため平面移動になります (${message})`

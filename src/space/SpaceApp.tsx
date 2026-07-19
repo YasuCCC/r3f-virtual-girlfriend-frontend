@@ -1,5 +1,5 @@
 import { Canvas } from "@react-three/fiber";
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { CollisionMesh } from "./components/CollisionMesh";
 import { GalleryRoom } from "./components/GalleryRoom";
@@ -193,6 +193,22 @@ export const SpaceApp = () => {
     setTimeout(() => chatInputRef.current?.focus(), 100);
   };
 
+  // 歩行中(ポインターロック中)はクリックできないため、Cキーでも呼び出せる
+  const summonRef = useRef(summonNpc);
+  summonRef.current = summonNpc;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "KeyC") return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+        return;
+      document.exitPointerLock?.();
+      void summonRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const loadSpace = (def: SpaceDefinition) => {
     setError(null);
     setNotice(null);
@@ -367,23 +383,7 @@ export const SpaceApp = () => {
               {error}
             </p>
           )}
-          <div className="flex w-full max-w-2xl items-center gap-2">
-            {npcAvailable && npcPhase === "hidden" && (
-              <button
-                type="button"
-                onClick={summonNpc}
-                className="flex-1 rounded-full bg-cyan-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-500"
-              >
-                🤖 AIコンシェルジュを呼び出す
-              </button>
-            )}
-            {npcAvailable && npcPhase === "summoning" && (
-              <div className="flex flex-1 items-center justify-center gap-2 rounded-full bg-gray-800/90 px-5 py-2.5 text-sm text-white">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-white" />
-                {npcConfig?.spawn?.loadingMessage ??
-                  "ただいま担当者を呼び出しています…"}
-              </div>
-            )}
+          <div className="flex w-full max-w-2xl items-center justify-end gap-2">
             {npcAvailable && npcPhase === "active" && (
               <form
                 onSubmit={sendNpcMessage}
@@ -417,6 +417,41 @@ export const SpaceApp = () => {
         </div>
       )}
 
+      {/* 中央の呼び出しバナー(Arrivalの「タップしてAIコンシェルジュを呼び出す」相当) */}
+      {npcAvailable &&
+        npcPhase !== "active" &&
+        !loading &&
+        (entered || enteredOnce || !requireLock) && (
+          <div className="pointer-events-none fixed left-1/2 top-24 z-20 -translate-x-1/2">
+            {npcPhase === "summoning" ? (
+              <div className="flex items-center gap-3 rounded-full border-2 border-cyan-400/80 bg-black/75 px-6 py-3 text-sm text-white shadow-xl">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-cyan-300" />
+                {npcConfig?.spawn?.loadingMessage ??
+                  "ただいま担当者を呼び出しています…"}
+              </div>
+            ) : entered ? (
+              <div className="rounded-full border-2 border-cyan-400/80 bg-black/75 px-6 py-3 text-center text-sm text-white shadow-xl">
+                🤖{" "}
+                <span className="mx-1 rounded bg-cyan-500/30 px-1.5 py-0.5 font-bold text-cyan-200">
+                  C
+                </span>
+                キーでAIコンシェルジュを呼び出す
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={summonNpc}
+                className="pointer-events-auto rounded-full border-2 border-cyan-400/80 bg-black/75 px-6 py-3 text-sm font-semibold text-white shadow-xl transition hover:bg-cyan-900/80"
+              >
+                🤖 クリックしてAIコンシェルジュを呼び出す
+                <span className="mt-0.5 block text-xs font-normal text-gray-300">
+                  AIコンシェルジュに質問をしたり、空間内を案内してもらえます
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+
       {/* 入場中のHUD */}
       {entered && (
         <>
@@ -426,7 +461,7 @@ export const SpaceApp = () => {
             {npcPhase === "active"
               ? " ・ NPCに照準を合わせてクリックで会話 ・ Esc: メニュー"
               : npcAvailable
-                ? " ・ Esc: コンシェルジュ呼び出し"
+                ? " ・ C: コンシェルジュ呼び出し ・ Esc: メニュー"
                 : " ・ Esc: メニュー"}
           </div>
         </>

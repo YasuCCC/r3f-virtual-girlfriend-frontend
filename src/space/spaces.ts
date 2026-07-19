@@ -30,8 +30,8 @@ export const SPACES: SpaceDefinition[] = [
   {
     id: "sample_room",
     title: "サンプルルーム(ローカル)",
-    splatUrl: "/splats/sample_room.sog",
-    collisionUrl: "/splats/sample_room_collision.glb",
+    splatUrl: `${import.meta.env.BASE_URL}splats/sample_room.sog`,
+    collisionUrl: `${import.meta.env.BASE_URL}splats/sample_room_collision.glb`,
     position: [0, 0, 0],
     rotationYDeg: 0,
     scale: 1,

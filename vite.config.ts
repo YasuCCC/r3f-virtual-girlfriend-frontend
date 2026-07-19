@@ -19,6 +19,8 @@ const fixSparkWasmDataUri = (): Plugin => ({
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // GitHub Pagesなどサブパス配信でも動くよう相対パスでビルドする
+  base: "./",
   plugins: [react(), fixSparkWasmDataUri()],
   optimizeDeps: {
     // 事前バンドルされると上記transformを通らないため除外する

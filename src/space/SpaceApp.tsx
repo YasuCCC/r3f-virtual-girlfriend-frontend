@@ -99,6 +99,9 @@ export const SpaceApp = () => {
   const loadSelected = () => {
     const def = SPACES.find((s) => s.id === selectedId);
     if (!def) return;
+    // 同じスペースを再選択した場合は再読み込みが走らないため何もしない
+    // (loadingだけが立ちっぱなしになるのを防ぐ)
+    if (activeSpace?.id === def.id) return;
     setError(null);
     setNotice(null);
     setLoading(true);
@@ -110,6 +113,7 @@ export const SpaceApp = () => {
     e.preventDefault();
     const url = urlInput.trim();
     if (!url) return;
+    if (activeSpace?.id === "custom" && activeSpace.splatUrl === url) return;
     setError(null);
     setNotice(null);
     setLoading(true);

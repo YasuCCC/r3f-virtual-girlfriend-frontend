@@ -1,0 +1,18 @@
+{
+  "buildCommand": "yarn build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/arrival-cdn/:path*", "destination": "https://dzrmwng2ae8bq.cloudfront.net/:path*" },
+    { "source": "/arrival-ugc/:path*", "destination": "https://ugc.arrival.space/:path*" },
+    { "source": "/npc-api/:path*", "destination": "https://npc-avatar-backend.vercel.app/:path*" },
+    { "source": "/", "destination": "/space.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(arrival-cdn|arrival-ugc)/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400" }
+      ]
+    }
+  ]
+}

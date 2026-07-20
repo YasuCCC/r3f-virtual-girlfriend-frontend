@@ -58,12 +58,21 @@ Arrival Space類似の3D空間サービス開発の引き継ぎドキュメン�
 
 ## 次のタスク(未着手/進行中)
 
-A. 【最優先】npc-avatar-backend の admin-app を admin-app-v2 としてコピー
-   (本番のadmin-appは触らない)。v2に以下を追加:
-   - 「アバター」タブ: パーツGLBアップロード+カタログ管理
-     (上記Arrival互換カタログJSONスキーマを採用)
-   - NPCへのアバター割り当てUI+3Dプレビュー
-   - 制服+企業ロゴプリセット(avatarCustomization設定UI, rect位置調整)
+A. 【実装済・オーナー実機確認待ち】admin-app-v2 (npc-avatar-backend の
+   ブランチ claude/admin-app-v2、mainには未マージ=未デプロイ)
+   - admin-react-v2/ (ソース) → ビルド → admin-app-v2/ (Vercelで /admin-app-v2/ 配信)
+   - 新タブ「🧩 アバターパーツ」: パーツGLBアップロード(api/upload kind:"model"、
+     Vercel制限で約3MBまで)+Arrival互換カタログ管理+制服・ロゴプリセット管理
+   - アバター設定/店舗NPC: avatarCustomization(parts/logo{url,mesh,rect}/colors)
+     エディタ+three.jsクライアント合成3Dプレビュー(実機と同ロジック)+プリセット適用
+   - API: api/avatars.js に catalog_get/catalog_save(Firestore avatar_part_catalogs、
+     共有main+顧客uid別、GET /api/avatars?catalog=1 は公開=タスクBのビルダー用)。
+     ※Vercel無料枠12関数の上限に達しているため新規APIファイルは作らないこと
+   - 検証メモ: 型チェック・ビルド・画面描画/3D合成プレビューは確認済。
+     Mantineモーダルは開発サンドボックスブラウザでは開かない(v1の未変更モーダルも
+     同症状=環境要因)。マージ後に本番URLでモーダル動作を確認すること
+   - 残: mainへのマージ(=デプロイ)、実データでのカタログ保存・GLBアップロード確認、
+     パーツ資産(タスクC)が無いと実質使えないためサンプルパーツGLBを最低1点用意
 B. ユーザー向けアバタービルダーUI(このリポジトリ側):
    カタログAPIからパーツ選択→プレビュー→保存({parts,tints}をバックエンドへ)
 C. パーツ資産の制作(Blender: 標準リグに合わせたGLB。スーツ・和装・日本人顔。
